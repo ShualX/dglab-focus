@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "郊狼自习室 · 当前页面检测",
   "description": "把 Chrome / Edge 当前前台页面地址交给本机郊狼自习室进行允许规则匹配。",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "minimum_chrome_version": "116",
   "permissions": ["tabs", "storage", "alarms"],
   "background": { "service_worker": "background.js", "type": "module" },

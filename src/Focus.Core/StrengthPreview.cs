@@ -3,10 +3,10 @@ namespace DglabFocus.Core;
 // Display-only simulation values. They are never converted to device commands or electrical units.
 public sealed record StrengthPreviewOptions
 {
-    public bool Enabled { get; init; }
-    public double Initial { get; init; }
-    public double Maximum { get; init; }
-    public double Increment { get; init; } = 1;
+    public bool Enabled { get; init; } = true;
+    public double Initial { get; init; } = 10;
+    public double Maximum { get; init; } = 40;
+    public double Increment { get; init; } = 5;
     public double IntervalSeconds { get; init; } = 30;
     public void Validate()
     {

@@ -37,6 +37,8 @@ public sealed record SessionOptions
 public sealed record SessionEvent(DateTimeOffset At, string Kind, string Message, int Level = 0);
 public sealed record SessionSnapshot
 {
+    public Guid? PlanId { get; init; }
+    public string? PlanName { get; init; }
     public SessionOptions Options { get; init; } = new();
     public SessionState State { get; init; }
     public SessionState ResumeState { get; init; }
@@ -55,6 +57,8 @@ public sealed record SessionSnapshot
 public sealed class Session
 {
     public const double ExitDelaySeconds = 300;
+    public Guid? PlanId { get; private set; }
+    public string? PlanName { get; private set; }
     public SessionOptions Options { get; private set; } = new();
     public SessionState State { get; private set; }
     public SessionState ResumeState { get; private set; } = SessionState.Focusing;
@@ -78,14 +82,19 @@ public sealed class Session
         ? Options.StrengthPreview.At(DebtSeconds, Options.AlertThresholdSeconds) : 0;
     public int RecentCount(DateTimeOffset now) => Incidents.Count(x => x > now.AddHours(-1) && x <= now);
 
-    public void Start(SessionOptions options, IEnumerable<AllowRule> rules, DateTimeOffset now)
+    public void Start(FocusPlan? plan, DateTimeOffset now)
     {
         if (IsActive) throw new InvalidOperationException("请先结束当前会话。");
+        if (plan == null) throw new ArgumentException("请先选择一个专注方案。");
+        plan.Validate();
+        var options = plan.Options;
         options.Validate();
-        var copy = rules.ToList();
+        var copy = plan.Rules.ToList();
         if (options.Mode != StudyMode.Paper && options.ApplicationMode == RuleMode.Whitelist && options.WebsiteMode == RuleMode.Whitelist
             && !copy.Any(x => x.Action == RuleAction.Allow)) throw new ArgumentException("白名单模式请先添加至少一条白名单规则。");
         Options = options with { };
+        PlanId = plan.Id;
+        PlanName = plan.Name.Trim();
         Rules = copy;
         TemporaryHost = null;
         FocusSeconds = SegmentSeconds = DebtSeconds = SinceCheckIn = RestRemaining = ExitRemaining = 0;
@@ -93,7 +102,7 @@ public sealed class Session
         NeedsCheckIn = incidentCounted = alerted = restEndsSession = false;
         previewEligible = false;
         State = SessionState.Focusing;
-        Emit(now, "start", "专注已开始。临时域名名额：1 个。");
+        Emit(now, "start", $"已按「{PlanName}」开始专注。临时域名名额：1 个。");
     }
 
     public bool AddTemporaryDomain(string value, DateTimeOffset now, out string message)
@@ -270,6 +279,7 @@ public sealed class Session
     private void Emit(DateTimeOffset now, string kind, string message, int level = 0) => Changed?.Invoke(new(now, kind, message, level));
     public SessionSnapshot Snapshot() => new()
     {
+        PlanId = PlanId, PlanName = PlanName,
         State = State, ResumeState = ResumeState, Options = Options, Rules = [..Rules], TemporaryHost = TemporaryHost,
         FocusSeconds = FocusSeconds, SegmentSeconds = SegmentSeconds, RestRemaining = RestRemaining,
         ExitRemaining = ExitRemaining, DebtSeconds = DebtSeconds, SinceCheckIn = SinceCheckIn,
@@ -280,6 +290,7 @@ public sealed class Session
         saved.Options.Validate();
         var s = new Session
         {
+            PlanId = saved.PlanId, PlanName = saved.PlanName,
             Options = saved.Options, State = saved.State, ResumeState = saved.ResumeState, Rules = [..saved.Rules],
             TemporaryHost = saved.TemporaryHost, FocusSeconds = Math.Max(0, saved.FocusSeconds),
             SegmentSeconds = Math.Max(0, saved.SegmentSeconds), RestRemaining = Math.Max(0, saved.RestRemaining),

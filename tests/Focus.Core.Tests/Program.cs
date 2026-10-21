@@ -201,11 +201,11 @@ Test("website blacklist mode never consumes temporary allowance", () => {
     var s = New(options: new() { WebsiteMode = RuleMode.Blacklist });
     True(!s.AddTemporaryDomain("docs.example.com", origin, out _)); Equal<string?>(null, s.TemporaryHost);
 });
-Test("old saved JSON migrates to whitelist mode and disabled strength preview", () => {
+Test("old snapshots use whitelist defaults and restore with zero active strength", () => {
     var saved = JsonSerializer.Deserialize<SessionSnapshot>("{\"Options\":{\"FocusMinutes\":0},\"State\":1,\"Rules\":[{\"Kind\":1,\"Value\":\"study.example.com\"}]}")!;
     var restored = Session.Restore(saved);
     Equal(RuleMode.Whitelist, restored.Options.ApplicationMode); Equal(RuleMode.Whitelist, restored.Options.WebsiteMode);
-    Equal(RuleAction.Allow, restored.Rules[0].Action); True(!restored.Options.StrengthPreview.Enabled); Equal(0d, restored.PreviewStrength);
+    Equal(RuleAction.Allow, restored.Rules[0].Action); True(restored.Options.StrengthPreview.Enabled); Equal(0d, restored.PreviewStrength);
 });
 Test("mixed blacklist policy and rules survive a restart", () => {
     var s = new Session(); s.Start(new() { ApplicationMode = RuleMode.Blacklist, WebsiteMode = RuleMode.Blacklist }, [new(RuleKind.Application, "game.exe", false, RuleAction.Block)], origin);
@@ -220,8 +220,8 @@ Test("strength preview starts at threshold, increments by time and respects ceil
     Equal(10d, p.At(60, 60)); // A reduced cumulative time naturally selects the lower preview level.
 });
 Test("disabled and zero-ceiling previews remain zero", () => {
-    Equal(0d, new StrengthPreviewOptions { Initial = 10, Maximum = 50 }.At(9999, 60));
-    Equal(0d, new StrengthPreviewOptions { Enabled = true }.At(9999, 60));
+    Equal(0d, new StrengthPreviewOptions { Enabled = false, Initial = 10, Maximum = 50 }.At(9999, 60));
+    Equal(0d, new StrengthPreviewOptions { Enabled = true, Initial = 0, Maximum = 0 }.At(9999, 60));
 });
 Test("strength profile rejects invalid ranges and non-finite numbers", () => {
     foreach (var p in new StrengthPreviewOptions[] {
@@ -252,6 +252,43 @@ Test("pause, restart, rest and check-in never retain active preview strength", (
 });
 Test("invalid list modes fail validation", () => {
     var rejected = false; try { new SessionOptions { ApplicationMode = (RuleMode)99 }.Validate(); } catch (ArgumentException) { rejected = true; } True(rejected);
+});
+
+Test("new plans enable a visible bounded curve by default", () => {
+    var plan = new FocusPlan(); plan.Validate();
+    True(plan.Options.StrengthPreview.Enabled);
+    True(plan.Options.StrengthPreview.Maximum > plan.Options.StrengthPreview.Initial);
+    True(plan.Options.StrengthPreview.At(60, 60) > 0);
+});
+Test("session cannot start without a chosen plan", () => {
+    var s = new Session(); var rejected = false;
+    try { s.Start(null, origin); } catch (ArgumentException) { rejected = true; }
+    True(rejected); Equal(SessionState.Idle, s.State); Equal<Guid?>(null, s.PlanId);
+});
+Test("invalid plan identity and name cannot start a session", () => {
+    foreach (var plan in new FocusPlan[] { new() { Id = Guid.Empty }, new() { Name = " " }, new() { Name = new string('x', 41) } }) {
+        var rejected = false; try { new Session().Start(plan, origin); } catch (ArgumentException) { rejected = true; } True(rejected);
+    }
+});
+Test("copying a plan preserves modes and curve but isolates rule edits", () => {
+    var first = new FocusPlan { Name = "复习", Options = new() { ApplicationMode = RuleMode.Blacklist, WebsiteMode = RuleMode.Whitelist },
+        Rules = [Domain("study.example.com"), new(RuleKind.Application, "game.exe", false, RuleAction.Block)] };
+    var second = first.Duplicate("复习 副本");
+    True(first.Id != second.Id); Equal(first.Options, second.Options); Equal(first.Rules.Count, second.Rules.Count);
+    second.Rules.Clear(); Equal(2, first.Rules.Count); Equal(0, second.Rules.Count);
+});
+Test("session captures chosen plan and does not follow later plan edits", () => {
+    var plan = new FocusPlan { Name = "课本", Rules = [Domain("study.example.com")] };
+    var s = new Session(); s.Start(plan, origin); plan.Rules.Clear();
+    Equal<Guid?>(plan.Id, s.PlanId); Equal("课本", s.PlanName); Equal(1, s.Rules.Count);
+    True(s.AddTemporaryDomain("reference.example.com", origin, out _)); Equal(0, plan.Rules.Count);
+    var restored = Session.Restore(JsonSerializer.Deserialize<SessionSnapshot>(JsonSerializer.Serialize(s.Snapshot()))!);
+    Equal<Guid?>(plan.Id, restored.PlanId); Equal("课本", restored.PlanName); Equal("reference.example.com", restored.TemporaryHost);
+});
+Test("active plan remains fixed even if a different plan is passed", () => {
+    var s = New(); var original = s.PlanId; var rejected = false;
+    try { s.Start(new FocusPlan { Name = "另一个", Options = new() { Mode = StudyMode.Paper } }, origin); } catch (InvalidOperationException) { rejected = true; }
+    True(rejected); Equal(original, s.PlanId);
 });
 
 var failed = 0;

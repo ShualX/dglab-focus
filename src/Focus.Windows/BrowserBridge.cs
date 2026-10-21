@@ -11,7 +11,7 @@ using Microsoft.Extensions.Logging;
 
 namespace DglabFocus.Windows;
 public sealed record BrowserReport(string Browser, string Url, bool Focused, bool Ambiguous, DateTimeOffset ReceivedAt);
-public sealed class BrowserBridge(string token) : IDisposable
+public sealed class BrowserBridge(string token, int port = BrowserBridge.Port) : IDisposable
 {
     public const int Port = 17839;
     private WebApplication? application;
@@ -32,7 +32,7 @@ public sealed class BrowserBridge(string token) : IDisposable
             builder.Logging.ClearProviders();
             builder.WebHost.ConfigureKestrel(options =>
             {
-                options.Listen(IPAddress.Loopback, Port);
+                options.Listen(IPAddress.Loopback, port);
                 options.AddServerHeader = false;
                 options.Limits.MaxRequestHeadersTotalSize = 8192;
                 options.Limits.RequestHeadersTimeout = TimeSpan.FromSeconds(5);

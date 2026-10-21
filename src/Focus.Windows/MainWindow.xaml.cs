@@ -48,12 +48,19 @@ public partial class MainWindow : Window
         storage = new Storage(smoke);
         settings = storage.Load();
         session = settings.Session != null ? Session.Restore(settings.Session) : new Session();
-        rules = new(settings.Rules);
+        plans = new(settings.Plans ?? []);
+        selectedPlanId = session.IsActive ? session.PlanId : settings.SelectedPlanId;
+        var selected = SelectedPlan;
+        settings.Options = selected?.Options ?? new();
+        rules = new(selected?.Rules ?? []);
         history = new(settings.History.Take(200));
         bridge = new(settings.BridgeToken);
         InitializeComponent();
         Icon = BitmapFrame.Create(new Uri("pack://application:,,,/Assets/focus.ico"));
         RuleList.ItemsSource = rules;
+        FocusPlanPicker.ItemsSource = PlanPicker.ItemsSource = plans;
+        SyncPlanPickers();
+        PlanNameBox.Text = selected?.Name ?? "";
         HistoryList.ItemsSource = history;
         LoadOptions();
         SoundBox.IsChecked = settings.Sound;
@@ -61,6 +68,7 @@ public partial class MainWindow : Window
         initializing = false;
         UpdateStrengthPreview();
         ShowPage("FocusPage");
+        ShowPlanTab("RulesEditor");
         session.Changed += SessionChanged;
         device.Updated += (message, url) => Dispatcher.InvokeAsync(() =>
         {
@@ -178,6 +186,8 @@ public partial class MainWindow : Window
     }
     private void Save()
     {
+        PersistPlanRules();
+        settings.Plans = [..plans]; settings.SelectedPlanId = selectedPlanId;
         settings.Rules = [..rules]; settings.History = [..history]; settings.Session = session.Snapshot();
         try { storage.Save(settings); }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Notice("配置保存失败：" + e.Message); session.Suspend(DateTimeOffset.Now, "配置保存失败，已暂停。"); }
@@ -208,7 +218,7 @@ public partial class MainWindow : Window
         StrengthValueLabel.Text = $"{session.PreviewStrength:0.#} / {o.StrengthPreview.Maximum:0.#}";
         StrengthBar.Maximum = Math.Max(1, o.StrengthPreview.Maximum); StrengthBar.Value = session.PreviewStrength;
         StartButton.Content = session.State switch { SessionState.Suspended => "继续本次会话", SessionState.Resting => "结束休息", SessionState.Focusing => "专注进行中", SessionState.ExitPending => "继续复习，等待退出", _ => "开始专注" };
-        StartButton.IsEnabled = storage.LoadError == null && session.State is not (SessionState.Focusing or SessionState.ExitPending);
+        StartButton.IsEnabled = storage.LoadError == null && (session.IsActive || SelectedPlan != null) && session.State is not (SessionState.Focusing or SessionState.ExitPending);
         ExitButton.IsEnabled = session.State is SessionState.Focusing or SessionState.Resting;
         ExitButton.Visibility = session.State == SessionState.ExitPending ? Visibility.Collapsed : Visibility.Visible;
         CancelExitButton.Visibility = session.State == SessionState.ExitPending ? Visibility.Visible : Visibility.Collapsed;
@@ -217,8 +227,10 @@ public partial class MainWindow : Window
         TemporaryInput.IsEnabled = TemporaryButton.IsEnabled;
         TemporaryLabel.Text = session.TemporaryHost != null ? $"本次临时允许：{session.TemporaryHost} · 剩余 0 个名额"
             : o.WebsiteMode == RuleMode.Blacklist ? "网站黑名单模式：未命中的域名已允许，无需临时放行。" : "每次会话可临时新增 1 个域名，仅本次有效，黑名单优先。";
-        AddAppButton.IsEnabled = BrowserRuleEditor.IsEnabled = SubdomainsBox.IsEnabled = SessionSettingsEditor.IsEnabled = !session.IsActive;
-        PolicyEditor.IsEnabled = AppRuleEditor.IsEnabled = StrengthSettingsEditor.IsEnabled = !session.IsActive;
+        var editable = !session.IsActive && SelectedPlan != null;
+        AddAppButton.IsEnabled = BrowserRuleEditor.IsEnabled = SubdomainsBox.IsEnabled = SessionSettingsEditor.IsEnabled = editable;
+        PolicyEditor.IsEnabled = AppRuleEditor.IsEnabled = StrengthSettingsEditor.IsEnabled = editable;
+        RefreshPlans();
         var summary = $"白名单 {rules.Count(x => x.Action == RuleAction.Allow)} 条 · 黑名单 {rules.Count(x => x.Action == RuleAction.Block)} 条。";
         RuleLockLabel.Text = summary + (session.IsActive ? "本次会话规则与模式已锁定。" : "黑名单始终优先，白名单模式下未列出内容算分心。");
         floating?.Update(stateText, Clock(seconds), session.State, session.NeedsCheckIn, session.DebtSeconds, o.AlertThresholdSeconds);
@@ -241,8 +253,8 @@ public partial class MainWindow : Window
         foreach (FrameworkElement child in PageHost.Children) child.Visibility = child.Name == name ? Visibility.Visible : Visibility.Collapsed;
         (PageTitle.Text, PageSubtitle.Text) = name switch
         {
-            "RulesPage" => ("黑白名单", "软件与网站分别配置，冲突时黑名单优先。"),
-            "SettingsPage" => ("会话设置", "选择适合这一段学习的节奏。"),
+            "PlansPage" => ("专注方案", "把黑白名单、专注节奏与强度曲线保存在同一个方案中。"),
+            "SettingsPage" => ("偏好设置", "调整提示音与界面动态效果。"),
             "DevicePage" => ("设备与浏览器", "所有专注判断在本机完成。"),
             "HistoryPage" => ("会话记录", "查看规则变化与提醒发生的时间。"),
             _ => ("专注控制台", "把注意力留在当前这一段。")
@@ -264,32 +276,34 @@ public partial class MainWindow : Window
     private void NavigateClick(object sender, RoutedEventArgs e) => ShowPage((string)((Button)sender).Tag);
     private void StartClick(object sender, RoutedEventArgs e)
     {
+        if (storage.LoadError != null) { Notice(storage.LoadError); return; }
         try
         {
             if (session.State == SessionState.Suspended) session.Resume(DateTimeOffset.Now);
             else if (session.State == SessionState.Resting) session.EndBreak(DateTimeOffset.Now);
             else if (!session.IsActive)
             {
-                settings.Options = ReadOptions();
-                session.Start(settings.Options, rules, DateTimeOffset.Now);
+                if (SelectedPlan == null) { Notice("请先创建并选择一个专注方案。"); ShowPage("PlansPage"); PlanPicker.Focus(); return; }
+                CommitSelectedPlan();
+                session.Start(SelectedPlan, DateTimeOffset.Now);
                 FeedbackLabel.Text = "模拟反馈待命 · 无设备输出";
                 FloatClick(sender, e);
             }
             lastTick = elapsed.Elapsed;
             ShowPage("FocusPage"); Save(); Refresh();
         }
-        catch (ArgumentException ex) { Notice(ex.Message); ShowPage(!rules.Any(x => x.Action == RuleAction.Allow) ? "RulesPage" : "SettingsPage"); }
+        catch (ArgumentException ex) { Notice(ex.Message); ShowPage("PlansPage"); }
     }
     private void PresetClick(object sender, RoutedEventArgs e)
     {
-        if (session.IsActive) { Notice("会话进行中，专注时长保持不变。"); return; }
+        if (session.IsActive || SelectedPlan == null) { Notice("请先选择方案，会话进行中不能修改时长。"); return; }
         FocusMinutesBox.Text = (string)((Button)sender).Tag;
         SaveSettingsClick(sender, e);
     }
     private void SaveSettingsClick(object sender, RoutedEventArgs e)
     {
         if (session.IsActive) { Notice("请在会话结束后修改设置。"); return; }
-        try { settings.Options = ReadOptions(); Save(); Refresh(); Notice("会话设置已保存。"); }
+        try { CommitSelectedPlan(); Save(); Refresh(); Notice("方案已保存：" + SelectedPlan!.Name); }
         catch (ArgumentException ex) { Notice(ex.Message); }
     }
     private void PreferencesClick(object sender, RoutedEventArgs e)
@@ -299,11 +313,10 @@ public partial class MainWindow : Window
     }
     private void PolicyChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (initializing || session.IsActive || AppPolicyBox.SelectedIndex < 0 || WebPolicyBox.SelectedIndex < 0) return;
-        settings.Options = settings.Options with { ApplicationMode = (RuleMode)AppPolicyBox.SelectedIndex, WebsiteMode = (RuleMode)WebPolicyBox.SelectedIndex };
+        if (initializing || session.IsActive || SelectedPlan == null || AppPolicyBox.SelectedIndex < 0 || WebPolicyBox.SelectedIndex < 0) return;
         if (sender == AppPolicyBox) AppActionBox.SelectedIndex = AppPolicyBox.SelectedIndex;
         if (sender == WebPolicyBox) WebActionBox.SelectedIndex = WebPolicyBox.SelectedIndex;
-        Save(); Refresh(); Notice("黑白名单模式已保存，下一次会话生效。");
+        Notice("已修改当前方案的黑白名单模式。保存方案或开始专注时生效。");
     }
     private void StrengthTextChanged(object sender, TextChangedEventArgs e) => UpdateStrengthPreview();
     private void StrengthInputChanged(object sender, RoutedEventArgs e) => UpdateStrengthPreview();
@@ -320,7 +333,7 @@ public partial class MainWindow : Window
         catch (ArgumentException ex)
         {
             StrengthValidationLabel.Foreground = (Brush)FindResource("Danger");
-            StrengthValidationLabel.Text = ex.Message; RampChart.Update(new());
+            StrengthValidationLabel.Text = ex.Message; RampChart.Update(new() { Enabled = false });
         }
     }
     private void ExitClick(object sender, RoutedEventArgs e) { session.RequestExit(DateTimeOffset.Now); Save(); ShowPage("FocusPage"); Refresh(); }
@@ -340,26 +353,27 @@ public partial class MainWindow : Window
     }
     private void AddAppClick(object sender, RoutedEventArgs e)
     {
-        if (session.IsActive) return;
+        if (session.IsActive || SelectedPlan == null) return;
         var picker = new OpenFileDialog { Filter = "Windows 程序 (*.exe)|*.exe", Title = AppActionBox.SelectedIndex == 1 ? "选择加入黑名单的软件" : "选择加入白名单的软件" };
         if (picker.ShowDialog(this) == true && Rules.TryCreate(RuleKind.Application, picker.FileName, false, out var rule))
             AddRule(rule! with { Action = AppActionBox.SelectedIndex == 1 ? RuleAction.Block : RuleAction.Allow });
     }
     private void AddWebClick(object sender, RoutedEventArgs e)
     {
-        if (session.IsActive) return;
+        if (session.IsActive || SelectedPlan == null) return;
         var kind = RuleKindBox.SelectedIndex switch { 1 => RuleKind.Page, 2 => RuleKind.PathPrefix, _ => RuleKind.Domain };
         if (Rules.TryCreate(kind, RuleInput.Text, SubdomainsBox.IsChecked == true, out var rule)) { AddRule(rule! with { Action = WebActionBox.SelectedIndex == 1 ? RuleAction.Block : RuleAction.Allow }); RuleInput.Clear(); }
         else Notice("域名请输入 example.com，页面或路径规则请输入以 https:// 开头的完整地址。");
     }
     private void AddRule(AllowRule rule)
     {
+        if (session.IsActive || SelectedPlan == null) return;
         if (rules.Contains(rule)) { Notice("这条规则已经存在。"); return; }
         rules.Add(rule); Save(); Refresh(); Notice((rule.Action == RuleAction.Block ? "黑名单" : "白名单") + "规则已添加，黑名单始终优先。");
     }
     private void RemoveRuleClick(object sender, RoutedEventArgs e)
     {
-        if (session.IsActive) { Notice("本次会话的允许规则已锁定。"); return; }
+        if (session.IsActive || SelectedPlan == null) { Notice("请在会话结束后编辑方案规则。"); return; }
         rules.Remove((AllowRule)((Button)sender).Tag); Save(); Refresh();
     }
     private void FloatClick(object sender, RoutedEventArgs e)
@@ -487,23 +501,59 @@ public partial class MainWindow : Window
         Directory.CreateDirectory(folder);
         try
         {
+            if (StartButton.IsEnabled) throw new InvalidOperationException("未选方案时启动按钮应禁用。");
+            StartClick(this, new RoutedEventArgs());
+            if (session.IsActive || page != "PlansPage") throw new InvalidOperationException("菜单绕过了必选方案限制。");
+            await Dispatcher.InvokeAsync(() => { UpdateLayout(); Capture(folder, "PlansEmpty"); }, DispatcherPriority.ApplicationIdle);
+            ShowPage("FocusPage");
+            await Dispatcher.InvokeAsync(() => { UpdateLayout(); Capture(folder, "FocusNoPlan"); }, DispatcherPriority.ApplicationIdle);
+            NewPlanClick(this, new RoutedEventArgs());
+            if (StrengthEnabledBox.IsChecked != true) throw new InvalidOperationException("新方案没有默认启用曲线预览。");
+            PlanNameBox.Text = "网课复习";
             rules.Add(new(RuleKind.Domain, "learn.example.com"));
             rules.Add(new(RuleKind.Page, "https://docs.example.com/course/lesson-1"));
             rules.Add(new(RuleKind.Application, @"C:\Program Files\StudyReader\StudyReader.exe"));
             rules.Add(new(RuleKind.Domain, "games.example.com", false, RuleAction.Block));
             rules.Add(new(RuleKind.Application, @"C:\Program Files\ExampleGame\Game.exe", false, RuleAction.Block));
-            settings.Options = settings.Options with { Mode = StudyMode.Reading,
-                StrengthPreview = new() { Enabled = true, Initial = 10, Maximum = 40, Increment = 5, IntervalSeconds = 30 } };
-            LoadOptions();
-            ShowPage("SettingsPage");
+            ModeBox.SelectedIndex = (int)StudyMode.Reading;
+            SaveSettingsClick(this, new RoutedEventArgs());
+            var firstId = selectedPlanId;
+            ShowPage("PlansPage"); ShowPlanTab("StrengthEditor");
             await Dispatcher.InvokeAsync(() => { UpdateLayout(); Capture(folder, "StrengthSetup"); }, DispatcherPriority.ApplicationIdle);
+            PageScroll.ScrollToBottom();
+            await Dispatcher.InvokeAsync(() => { UpdateLayout(); Capture(folder, "StrengthCurve"); }, DispatcherPriority.ApplicationIdle);
+            PageScroll.ScrollToTop();
+            CopyPlanClick(this, new RoutedEventArgs());
+            var secondId = selectedPlanId;
+            PlanNameBox.Text = "纸笔复习"; ModeBox.SelectedIndex = (int)StudyMode.Paper;
+            FocusMinutesBox.Text = "25"; rules.Clear();
+            SaveSettingsClick(this, new RoutedEventArgs());
             StrengthMaximumBox.Text = "5";
             SaveSettingsClick(this, new RoutedEventArgs());
             if (settings.Options.StrengthPreview.Maximum != 40 || !StrengthValidationLabel.Text.Contains("上限"))
                 throw new InvalidOperationException("无效的模拟强度设置被保存。");
+            FocusPlanPicker.SelectedValue = firstId;
+            if (selectedPlanId != secondId) throw new InvalidOperationException("无效参数被切换方案时静默丢弃。");
             await Dispatcher.InvokeAsync(() => { UpdateLayout(); Capture(folder, "InvalidStrength"); }, DispatcherPriority.ApplicationIdle);
             StrengthMaximumBox.Text = "40";
+            DeletePlanClick(this, new RoutedEventArgs());
+            if (SelectedPlan != null || StartButton.IsEnabled || plans.Count != 1) throw new InvalidOperationException("删除方案后被自动选择了其他方案。");
             StartClick(this, new RoutedEventArgs());
+            if (session.IsActive) throw new InvalidOperationException("删除后未选方案仍可启动。");
+            UndoDeletePlanClick(this, new RoutedEventArgs());
+            if (plans.Count != 2 || selectedPlanId != secondId) throw new InvalidOperationException("撤销删除没有恢复方案。");
+            FocusPlanPicker.SelectedValue = firstId;
+            if (rules.Count != 5 || settings.Options.FocusMinutes != 50 || settings.Options.Mode != StudyMode.Reading)
+                throw new InvalidOperationException("方案之间的参数或黑白名单相互污染。");
+            ShowPage("PlansPage"); ShowPlanTab("RulesEditor");
+            await Dispatcher.InvokeAsync(() => { UpdateLayout(); Capture(folder, "PlansRules"); }, DispatcherPriority.ApplicationIdle);
+            ShowPlanTab("RhythmEditor");
+            await Dispatcher.InvokeAsync(() => { UpdateLayout(); Capture(folder, "PlansRhythm"); }, DispatcherPriority.ApplicationIdle);
+            StartClick(this, new RoutedEventArgs());
+            if (session.PlanId != firstId || session.PlanName != "网课复习") throw new InvalidOperationException("启动没有绑定选择的方案。");
+            PlanPicker.SelectedValue = secondId;
+            if (selectedPlanId != firstId || session.PlanId != firstId || PlanPicker.SelectedValue as Guid? != firstId)
+                throw new InvalidOperationException("会话中可以切换方案。");
             for (int i = 0; i < 1120; i++) session.Tick(TimeSpan.FromSeconds(1), DateTimeOffset.Now, Attention.Allowed, 0);
             session.CheckIn(DateTimeOffset.Now);
             session.Tick(TimeSpan.FromSeconds(1), DateTimeOffset.Now, Attention.Allowed, 0);
@@ -511,10 +561,11 @@ public partial class MainWindow : Window
             CurrentAppLabel.Text = "Microsoft Edge"; CurrentUrlLabel.Text = "learn.example.com";
             DetectionLabel.Text = "允许的学习内容";
             Refresh();
-            foreach (var name in new[] { "FocusPage", "RulesPage", "SettingsPage", "DevicePage", "HistoryPage" })
+            ShowPlanTab("RulesEditor");
+            foreach (var name in new[] { "FocusPage", "PlansPage", "SettingsPage", "DevicePage", "HistoryPage" })
             {
                 ShowPage(name); await Dispatcher.InvokeAsync(() => { UpdateLayout(); Capture(folder, name); }, DispatcherPriority.ApplicationIdle);
-                if (name == "RulesPage")
+                if (name == "PlansPage")
                 {
                     PageScroll.ScrollToBottom();
                     await Dispatcher.InvokeAsync(() => { UpdateLayout(); Capture(folder, "RuleEntries"); }, DispatcherPriority.ApplicationIdle);
@@ -536,7 +587,9 @@ public partial class MainWindow : Window
             floating?.Capture(Path.Combine(folder, "FloatingExpanded.png"));
             Width = 920; Height = 680;
             await Dispatcher.InvokeAsync(() => { UpdateLayout(); Capture(folder, "Compact"); }, DispatcherPriority.ApplicationIdle);
-            File.WriteAllText(Path.Combine(folder, "smoke-result.txt"), $"PASS: 5 pages, blacklist entries, strength setup, validation, active simulation, exit, floating and compact layout rendered.\nInvalid strength settings rejected; unknown state cleared preview.\nNo device output or user settings used.\nRuntime: {RuntimeInformation.FrameworkDescription}\n");
+            ShowPage("PlansPage"); ShowPlanTab("RulesEditor");
+            await Dispatcher.InvokeAsync(() => { UpdateLayout(); Capture(folder, "PlansCompact"); }, DispatcherPriority.ApplicationIdle);
+            File.WriteAllText(Path.Combine(folder, "smoke-result.txt"), $"PASS: empty plan library, required selection, create/copy/rename/delete/undo, isolated plan rules and timing, invalid edits block switching, active plan locked.\n5 pages, plan tabs, default strength curve, validation, active simulation, exit, floating and compact layouts rendered.\nUnknown state cleared preview. No device output or user settings used.\nRuntime: {RuntimeInformation.FrameworkDescription}\n");
         }
         catch (Exception e) { File.WriteAllText(Path.Combine(folder, "smoke-result.txt"), "FAIL: " + e); Environment.ExitCode = 1; }
         Quit();

@@ -1,5 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:local="clr-namespace:DglabFocus.Windows" x:Class="DglabFocus.Windows.MainWindow" Title="郊狼自习室 · dglab-focus" Width="1180" Height="830" MinWidth="920" MinHeight="680" WindowStartupLocation="CenterScreen" Closing="WindowClosing" SourceInitialized="WindowInitialized">
+  <Window.Resources>
+    <DataTemplate x:Key="PlanNameTemplate">
+      <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" ToolTip="{Binding Name}"/>
+    </DataTemplate>
+  </Window.Resources>
   <DockPanel>
     <Menu DockPanel.Dock="Top">
       <MenuItem Header="会话(_S)">
@@ -32,13 +37,13 @@
             <TextBlock Text="STUDY ROOM" Style="{StaticResource Caption}" FontFamily="Bahnschrift" FontSize="11"/>
           </StackPanel>
           <StackPanel DockPanel.Dock="Bottom" Margin="12,12,0,0">
-            <TextBlock Text="WINDOWS · v0.2.0" Style="{StaticResource Caption}" FontFamily="Bahnschrift"/>
+            <TextBlock Text="WINDOWS · v0.3.0" Style="{StaticResource Caption}" FontFamily="Bahnschrift"/>
             <TextBlock Text="独立开源项目 / 模拟预览版" Style="{StaticResource Caption}" FontSize="11" Margin="0,6,0,0"/>
           </StackPanel>
           <StackPanel>
             <Button x:Name="NavFocus" Content="◉   专注控制台" Style="{StaticResource Nav}" Tag="FocusPage" Click="NavigateClick"/>
-            <Button Content="☷   黑白名单" Style="{StaticResource Nav}" Tag="RulesPage" Click="NavigateClick"/>
-            <Button Content="◷   会话设置" Style="{StaticResource Nav}" Tag="SettingsPage" Click="NavigateClick"/>
+            <Button Content="☷   专注方案" Style="{StaticResource Nav}" Tag="PlansPage" Click="NavigateClick"/>
+            <Button Content="◷   偏好设置" Style="{StaticResource Nav}" Tag="SettingsPage" Click="NavigateClick"/>
             <Button Content="⌁   设备与浏览器" Style="{StaticResource Nav}" Tag="DevicePage" Click="NavigateClick"/>
             <Button Content="≡   会话记录" Style="{StaticResource Nav}" Tag="HistoryPage" Click="NavigateClick"/>
             <Border Height="1" Background="{DynamicResource Line}" Margin="10,20"/>
@@ -73,8 +78,23 @@
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
               </Grid.RowDefinitions>
-              <Grid>
+              <Border Style="{StaticResource Card}" Padding="16" Margin="0,0,0,16">
+                <Grid>
+                  <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                  <StackPanel Margin="0,0,16,0">
+                    <TextBlock Text="本次使用的方案 · 必选" Style="{StaticResource Caption}" Margin="0,0,0,7"/>
+                    <ComboBox x:Name="FocusPlanPicker" ItemTemplate="{StaticResource PlanNameTemplate}" SelectedValuePath="Id" SelectionChanged="PlanSelectionChanged" AutomationProperties.Name="启动专注前选择方案"/>
+                    <TextBlock x:Name="SelectedPlanSummary" Style="{StaticResource Caption}" FontSize="12" Margin="0,7,0,0"/>
+                  </StackPanel>
+                  <StackPanel Grid.Column="1" VerticalAlignment="Center" Width="170">
+                    <Button x:Name="StartButton" Content="开始专注" Style="{StaticResource Primary}" Click="StartClick" MinHeight="44"/>
+                    <Button Content="设计方案" Click="ManagePlansClick" Margin="0,8,0,0" Padding="12,6" MinHeight="34"/>
+                  </StackPanel>
+                </Grid>
+              </Border>
+              <Grid Grid.Row="1">
                 <Grid.ColumnDefinitions>
                   <ColumnDefinition Width="*"/>
                   <ColumnDefinition Width="300"/>
@@ -86,12 +106,11 @@
                       <TextBlock x:Name="ModeLabel" Text="电脑复习" HorizontalAlignment="Right" Style="{StaticResource Caption}"/>
                     </Grid>
                     <local:FocusDial x:Name="Dial" Height="328" MinWidth="280" AutomationProperties.Name="专注计时盘"/>
-                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,0,0,18">
+                    <StackPanel x:Name="PresetEditor" Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,0,0,18">
                       <Button Content="25 分钟" Click="PresetClick" Tag="25" Padding="12,6" MinHeight="34"/>
                       <Button Content="50 分钟" Click="PresetClick" Tag="50" Padding="12,6" MinHeight="34" Margin="8,0"/>
                       <Button Content="无限" Click="PresetClick" Tag="0" Padding="12,6" MinHeight="34"/>
                     </StackPanel>
-                    <Button x:Name="StartButton" Content="开始专注" Style="{StaticResource Primary}" Click="StartClick" MinHeight="48" FontSize="16"/>
                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,12,0,0">
                       <Button x:Name="ExitButton" Content="申请退出" Click="ExitClick" Padding="14,8"/>
                       <Button x:Name="CancelExitButton" Content="取消退出" Click="CancelExitClick" Visibility="Collapsed"/>
@@ -134,7 +153,7 @@
                   </Border>
                 </StackPanel>
               </Grid>
-              <Border x:Name="CheckInPanel" Grid.Row="1" Style="{StaticResource Card}" BorderBrush="{DynamicResource Accent}" Margin="0,16,0,0" Visibility="Collapsed">
+              <Border x:Name="CheckInPanel" Grid.Row="2" Style="{StaticResource Card}" BorderBrush="{DynamicResource Accent}" Margin="0,16,0,0" Visibility="Collapsed">
                 <Grid>
                   <Grid.ColumnDefinitions>
                     <ColumnDefinition/>
@@ -147,7 +166,7 @@
                   <Button Grid.Column="1" Content="我在学习" Style="{StaticResource Primary}" Click="CheckInClick"/>
                 </Grid>
               </Border>
-              <Border Grid.Row="2" Style="{StaticResource Card}" Margin="0,16,0,0" Padding="20">
+              <Border Grid.Row="3" Style="{StaticResource Card}" Margin="0,16,0,0" Padding="20">
                 <Grid>
                   <Grid.ColumnDefinitions>
                     <ColumnDefinition/>
@@ -162,7 +181,39 @@
                 </Grid>
               </Border>
             </Grid>
-            <StackPanel x:Name="RulesPage" Visibility="Collapsed">
+            <StackPanel x:Name="PlansPage" Visibility="Collapsed">
+              <Border Style="{StaticResource Card}" Padding="18" Margin="0,0,0,16">
+                <StackPanel>
+                  <Grid>
+                    <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                    <ComboBox x:Name="PlanPicker" ItemTemplate="{StaticResource PlanNameTemplate}" SelectedValuePath="Id" SelectionChanged="PlanSelectionChanged" AutomationProperties.Name="选择要设计的专注方案"/>
+                    <WrapPanel x:Name="PlanActions" Grid.Column="1" Margin="12,0,0,0">
+                      <Button Content="新建" Click="NewPlanClick" Margin="0,0,8,0" Padding="12,8"/>
+                      <Button x:Name="CopyPlanButton" Content="复制" Click="CopyPlanClick" Margin="0,0,8,0" Padding="12,8"/>
+                      <Button x:Name="DeletePlanButton" Content="删除" Click="DeletePlanClick" Padding="12,8"/>
+                      <Button x:Name="UndoDeleteButton" Content="撤销删除" Click="UndoDeletePlanClick" Visibility="Collapsed" Margin="8,0,0,0" Padding="12,8"/>
+                    </WrapPanel>
+                  </Grid>
+                  <TextBlock x:Name="PlanStatusLabel" Style="{StaticResource Caption}" Margin="0,10,0,0"/>
+                </StackPanel>
+              </Border>
+              <StackPanel x:Name="PlanEditor">
+                <Border Style="{StaticResource Card}" Padding="18" Margin="0,0,0,16">
+                  <StackPanel>
+                    <TextBlock Text="方案名称" Style="{StaticResource Caption}" Margin="0,0,0,7"/>
+                    <Grid>
+                      <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                      <TextBox x:Name="PlanNameBox" MaxLength="40" AutomationProperties.Name="方案名称"/>
+                      <Button x:Name="SavePlanButton" Grid.Column="1" Content="保存整个方案" Click="SaveSettingsClick" Style="{StaticResource Primary}" Margin="12,0,0,0"/>
+                    </Grid>
+                    <WrapPanel Margin="0,14,0,0">
+                      <Button x:Name="PlanTabRules" Content="黑白名单" Tag="RulesEditor" Click="PlanTabClick" Margin="0,0,8,0"/>
+                      <Button x:Name="PlanTabRhythm" Content="专注节奏" Tag="RhythmEditor" Click="PlanTabClick" Margin="0,0,8,0"/>
+                      <Button x:Name="PlanTabStrength" Content="强度曲线" Tag="StrengthEditor" Click="PlanTabClick"/>
+                    </WrapPanel>
+                  </StackPanel>
+                </Border>
+                <StackPanel x:Name="RulesEditor">
               <Border Style="{StaticResource Card}" Margin="0,0,0,16">
                 <StackPanel>
                   <TextBlock Text="默认匹配方式" Style="{StaticResource SectionTitle}"/>
@@ -255,8 +306,8 @@
                   </DataTemplate>
                 </ListBox.ItemTemplate>
               </ListBox>
-            </StackPanel>
-            <StackPanel x:Name="SettingsPage" Visibility="Collapsed">
+                </StackPanel>
+                <StackPanel x:Name="StrengthEditor" Visibility="Collapsed">
               <Border Style="{StaticResource Card}" Margin="0,0,0,16">
                 <StackPanel>
                   <TextBlock Text="模拟强度递增" Style="{StaticResource SectionTitle}"/>
@@ -283,10 +334,11 @@
                     </UniformGrid>
                     <TextBlock x:Name="StrengthValidationLabel" Style="{StaticResource Caption}" Margin="0,12,0,0"/>
                     <local:StrengthChart x:Name="RampChart" Height="132" Margin="0,12,0,0" AutomationProperties.Name="达到提醒线后前五次递增的模拟强度曲线"/>
-                    <Button Content="保存强度与会话设置" Click="SaveSettingsClick" Style="{StaticResource Primary}" HorizontalAlignment="Left" Margin="0,12,0,0"/>
                   </StackPanel>
                 </StackPanel>
               </Border>
+                </StackPanel>
+                <StackPanel x:Name="RhythmEditor" Visibility="Collapsed">
               <Border Style="{StaticResource Card}" Margin="0,0,0,16">
                 <StackPanel>
                   <TextBlock Text="会话节奏" Style="{StaticResource SectionTitle}"/>
@@ -336,11 +388,14 @@
                         <TextBox x:Name="RecoveryRateBox" Text="0.5" Margin="0,7,0,0" AutomationProperties.Name="恢复速度"/>
                       </StackPanel>
                     </UniformGrid>
-                    <Button Content="保存会话设置" Click="SaveSettingsClick" Style="{StaticResource Primary}" HorizontalAlignment="Left" Margin="0,20,0,0"/>
                   </StackPanel>
                   <TextBlock Text="设置在下一次会话生效。休息、继续、取消退出和重新启动软件均不补充临时域名名额。" Style="{StaticResource Caption}" Margin="0,16,0,0"/>
                 </StackPanel>
               </Border>
+                </StackPanel>
+              </StackPanel>
+            </StackPanel>
+            <StackPanel x:Name="SettingsPage" Visibility="Collapsed">
               <Border Style="{StaticResource Card}">
                 <StackPanel>
                   <TextBlock Text="反馈与显示" Style="{StaticResource SectionTitle}"/>
@@ -402,7 +457,7 @@
           </Grid>
         </ScrollViewer>
         <Border Grid.Row="2" x:Name="NoticePanel" Background="{DynamicResource Raised}" CornerRadius="9" Padding="14,10" Margin="0,14,0,0">
-          <TextBlock x:Name="NoticeLabel" Text="先添加允许规则，再开始专注。设备未到货也可以验证完整计时流程。" FontSize="12" Foreground="{DynamicResource Muted}"/>
+          <TextBlock x:Name="NoticeLabel" Text="先创建并选择一个专注方案，再开始专注。" FontSize="12" Foreground="{DynamicResource Muted}"/>
         </Border>
       </Grid>
     </Grid>
