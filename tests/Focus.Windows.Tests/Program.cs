@@ -5,7 +5,7 @@ using DglabFocus.Windows;
 
 var token = new string('A', 48);
 using var bridge = new BrowserBridge(token);
-bridge.Start();
+await bridge.StartAsync();
 var tests = 0;
 void Assert(bool success, string message) { if (!success) throw new Exception(message); Console.WriteLine("PASS " + message); tests++; }
 async Task<ClientWebSocket> Connect(string origin = "chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")

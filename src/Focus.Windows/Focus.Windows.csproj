@@ -13,6 +13,7 @@
     <Description>郊狼自习室 Windows 专注工具（模拟预览版）</Description>
   </PropertyGroup>
   <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App"/>
     <ProjectReference Include="../Focus.Core/Focus.Core.csproj"/>
     <PackageReference Include="QRCoder" Version="1.6.0"/>
     <Resource Include="Assets/focus.ico"/>

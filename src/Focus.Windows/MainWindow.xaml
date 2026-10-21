@@ -7,7 +7,7 @@
         <MenuItem Header="申请退出（等待 5 分钟）" Click="ExitClick"/>
         <MenuItem Header="取消退出" Click="CancelExitClick"/>
         <Separator/>
-        <MenuItem Header="立即暂停" InputGestureText="Ctrl+Alt+F12" Click="EmergencyClick"/>
+        <MenuItem Header="立即暂停" InputGestureText="Ctrl+Alt+F10" Click="EmergencyClick"/>
       </MenuItem>
       <MenuItem Header="视图(_V)">
         <MenuItem Header="显示悬浮球" Click="FloatClick"/>
@@ -43,7 +43,7 @@
             <Button Content="≡   会话记录" Style="{StaticResource Nav}" Tag="HistoryPage" Click="NavigateClick"/>
             <Border Height="1" Background="{DynamicResource Line}" Margin="10,20"/>
             <Button Content="立即暂停" Foreground="{DynamicResource Danger}" Click="EmergencyClick" ToolTip="暂停会话与模拟反馈，不受退出倒计时限制"/>
-            <TextBlock x:Name="HotkeyLabel" Text="Ctrl + Alt + F12" Style="{StaticResource Caption}" FontSize="11" HorizontalAlignment="Center" Margin="0,8,0,0"/>
+            <TextBlock x:Name="HotkeyLabel" Text="Ctrl + Alt + F10" Style="{StaticResource Caption}" FontSize="11" HorizontalAlignment="Center" Margin="0,8,0,0"/>
           </StackPanel>
         </DockPanel>
       </Border>

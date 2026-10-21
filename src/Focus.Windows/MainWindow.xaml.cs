@@ -84,7 +84,7 @@ public partial class MainWindow : Window
             Loaded += async (_, _) => await RunSmoke(args);
         else
         {
-            bridge.Start();
+            Loaded += async (_, _) => await bridge.StartAsync();
             SystemEvents.SessionSwitch += SessionSwitch;
             SystemEvents.PowerModeChanged += PowerChanged;
             CreateTray();
