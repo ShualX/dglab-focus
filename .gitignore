@@ -1,0 +1,9 @@
+**/bin/
+**/obj/
+.vs/
+artifacts/
+dist/
+*.user
+*.log
+*.local.json
+node_modules/

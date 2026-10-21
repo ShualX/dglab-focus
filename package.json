@@ -1,0 +1,1 @@
+{"name":"dglab-focus-tools","private":true,"type":"module","scripts":{"test":"node --test tests/extension.test.js"}}

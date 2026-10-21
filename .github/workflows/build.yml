@@ -1,0 +1,38 @@
+name: Windows checks and package
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: dotnet run --project tests/Focus.Core.Tests -c Release
+      - run: dotnet run --project tests/Focus.Windows.Tests -c Release
+      - run: node --test tests/extension.test.js
+      - run: dotnet build src/Focus.Windows/Focus.Windows.csproj -c Release --nologo
+      - name: Render UI
+        shell: pwsh
+        run: |
+          $process = Start-Process -FilePath '.\src\Focus.Windows\bin\Release\net8.0-windows\DglabFocus.exe' -ArgumentList '--smoke-test','--capture-dir',"$PWD\artifacts\ui" -WindowStyle Hidden -PassThru -Wait
+          if ($process.ExitCode -ne 0) { throw 'UI smoke test failed' }
+          if (!(Test-Path 'artifacts/ui/smoke-result.txt')) { throw 'Missing smoke result' }
+          if ((Get-Content 'artifacts/ui/smoke-result.txt' -Raw) -notmatch '^PASS:') { throw 'UI render check failed' }
+      - name: Package
+        shell: pwsh
+        run: ./scripts/package.ps1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dglab-focus-windows-x64
+          path: |
+            dist/dglab-focus-windows-x64.zip
+            dist/SHA256SUMS.txt
+            artifacts/ui/

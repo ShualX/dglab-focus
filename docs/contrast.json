@@ -1,0 +1,32 @@
+[
+  {
+    "text": "#F4F2E9",
+    "surface": "#1B1B1D",
+    "ratio": 15.33
+  },
+  {
+    "text": "#B5B4AD",
+    "surface": "#1B1B1D",
+    "ratio": 8.27
+  },
+  {
+    "text": "#B5B4AD",
+    "surface": "#242426",
+    "ratio": 7.45
+  },
+  {
+    "text": "#FFEB9B",
+    "surface": "#1B1B1D",
+    "ratio": 14.42
+  },
+  {
+    "text": "#17150E",
+    "surface": "#FFEB9B",
+    "ratio": 15.31
+  },
+  {
+    "text": "#FFAAAA",
+    "surface": "#242426",
+    "ratio": 8.55
+  }
+]
