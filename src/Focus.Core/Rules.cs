@@ -3,16 +3,20 @@ using System.Globalization;
 namespace DglabFocus.Core;
 
 public enum RuleKind { Application, Domain, Page, PathPrefix }
+public enum RuleAction { Allow, Block }
+public enum RuleMode { Whitelist, Blacklist }
 public enum Attention { Allowed, Outside, Unknown, Neutral }
-public sealed record AllowRule(RuleKind Kind, string Value, bool IncludeSubdomains = false)
+public sealed record AllowRule(RuleKind Kind, string Value, bool IncludeSubdomains = false, RuleAction Action = RuleAction.Allow)
 {
-    public string Label => Kind switch
+    public string KindLabel => Kind switch
     {
         RuleKind.Application => "软件",
         RuleKind.Domain => IncludeSubdomains ? "域名及子域名" : "域名",
         RuleKind.Page => "具体页面",
         _ => "页面路径"
     };
+    public string Label => (Action == RuleAction.Block ? "黑名单 · " : "白名单 · ") + KindLabel;
+    public bool IsBlocked => Action == RuleAction.Block;
     public string Display => Kind == RuleKind.Application ? Path.GetFileName(Value) : Value;
 }
 
@@ -67,19 +71,24 @@ public static class Rules
     }
 
     public static Attention Evaluate(IReadOnlyCollection<AllowRule> rules, string? executable, string? browserUrl,
-        bool isBrowser, bool browserFresh)
+        bool isBrowser, bool browserFresh, RuleMode applicationMode = RuleMode.Whitelist, RuleMode websiteMode = RuleMode.Whitelist)
     {
         if (string.IsNullOrEmpty(executable)) return Attention.Unknown;
-        // Web rules always take precedence over a broad browser executable allowance.
-        if (isBrowser && rules.Any(x => x.Kind != RuleKind.Application))
+        bool AppMatch(AllowRule rule) => rule.Kind == RuleKind.Application
+            && string.Equals(rule.Value, executable, StringComparison.OrdinalIgnoreCase);
+        if (rules.Any(x => x.Action == RuleAction.Block && AppMatch(x))) return Attention.Outside;
+        var appAllowed = rules.Any(x => x.Action == RuleAction.Allow && AppMatch(x));
+        if (isBrowser)
         {
+            var webRules = rules.Where(x => x.Kind != RuleKind.Application).ToList();
+            // Preserve old software-only browser allowances, but never let them bypass a web policy.
+            if (webRules.Count == 0 && websiteMode == RuleMode.Whitelist && appAllowed) return Attention.Allowed;
             if (!browserFresh || string.IsNullOrEmpty(browserUrl)) return Attention.Unknown;
             if (!Uri.TryCreate(browserUrl, UriKind.Absolute, out var u) || (u.Scheme != "http" && u.Scheme != "https")) return Attention.Unknown;
-            return rules.Any(x => MatchesUrl(x, browserUrl)) ? Attention.Allowed : Attention.Outside;
+            if (webRules.Any(x => x.Action == RuleAction.Block && MatchesUrl(x, browserUrl))) return Attention.Outside;
+            if (webRules.Any(x => x.Action == RuleAction.Allow && MatchesUrl(x, browserUrl))) return Attention.Allowed;
+            return websiteMode == RuleMode.Blacklist ? Attention.Allowed : Attention.Outside;
         }
-        if (rules.Any(x => x.Kind == RuleKind.Application && string.Equals(x.Value, executable, StringComparison.OrdinalIgnoreCase)))
-            return Attention.Allowed;
-        if (isBrowser && !browserFresh) return Attention.Unknown;
-        return Attention.Outside;
+        return appAllowed || applicationMode == RuleMode.Blacklist ? Attention.Allowed : Attention.Outside;
     }
 }

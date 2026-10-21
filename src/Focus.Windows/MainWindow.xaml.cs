@@ -34,6 +34,7 @@ public partial class MainWindow : Window
     private TimeSpan lastTick;
     private int saveTick;
     private bool closing;
+    private bool initializing = true;
     private string page = "FocusPage";
     private string? pairingUrl;
     private double zoom = 1;
@@ -57,6 +58,9 @@ public partial class MainWindow : Window
         LoadOptions();
         SoundBox.IsChecked = settings.Sound;
         ReducedMotionBox.IsChecked = settings.ReducedMotion;
+        initializing = false;
+        UpdateStrengthPreview();
+        ShowPage("FocusPage");
         session.Changed += SessionChanged;
         device.Updated += (message, url) => Dispatcher.InvokeAsync(() =>
         {
@@ -95,6 +99,8 @@ public partial class MainWindow : Window
     }
     private void LoadOptions()
     {
+        var wasInitializing = initializing;
+        initializing = true;
         var o = settings.Options;
         string N(double v) => v.ToString(CultureInfo.InvariantCulture);
         FocusMinutesBox.Text = N(o.FocusMinutes); RestMinutesBox.Text = N(o.RestMinutes);
@@ -102,19 +108,33 @@ public partial class MainWindow : Window
         GraceBox.Text = N(o.GraceSeconds); ThresholdBox.Text = N(o.AlertThresholdSeconds);
         IdleBox.Text = N(o.IdleSeconds); CheckInMinutesBox.Text = N(o.CheckInMinutes);
         RecoveryDelayBox.Text = N(o.RecoveryDelaySeconds); RecoveryRateBox.Text = N(o.RecoveryRate);
+        AppPolicyBox.SelectedIndex = AppActionBox.SelectedIndex = (int)o.ApplicationMode;
+        WebPolicyBox.SelectedIndex = WebActionBox.SelectedIndex = (int)o.WebsiteMode;
+        StrengthEnabledBox.IsChecked = o.StrengthPreview.Enabled;
+        StrengthInitialBox.Text = N(o.StrengthPreview.Initial); StrengthMaximumBox.Text = N(o.StrengthPreview.Maximum);
+        StrengthIncrementBox.Text = N(o.StrengthPreview.Increment); StrengthIntervalBox.Text = N(o.StrengthPreview.IntervalSeconds);
+        initializing = wasInitializing;
+        UpdateStrengthPreview();
     }
+    private static double Number(TextBox box)
+    {
+        if (!double.TryParse(box.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out var value)) throw new ArgumentException("请填写有效数字，小数点使用 .。");
+        return value;
+    }
+    private StrengthPreviewOptions ReadStrength() => new()
+    {
+        Enabled = StrengthEnabledBox.IsChecked == true, Initial = Number(StrengthInitialBox), Maximum = Number(StrengthMaximumBox),
+        Increment = Number(StrengthIncrementBox), IntervalSeconds = Number(StrengthIntervalBox)
+    };
     private SessionOptions ReadOptions()
     {
-        static double Number(TextBox box)
-        {
-            if (!double.TryParse(box.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out var value)) throw new ArgumentException("请填写有效数字，小数点使用 .。");
-            return value;
-        }
         var o = new SessionOptions
         {
             FocusMinutes = Number(FocusMinutesBox), RestMinutes = Number(RestMinutesBox), Mode = (StudyMode)ModeBox.SelectedIndex,
             Repeat = RepeatBox.IsChecked == true, GraceSeconds = Number(GraceBox), AlertThresholdSeconds = Number(ThresholdBox),
-            IdleSeconds = Number(IdleBox), CheckInMinutes = Number(CheckInMinutesBox), RecoveryDelaySeconds = Number(RecoveryDelayBox), RecoveryRate = Number(RecoveryRateBox)
+            IdleSeconds = Number(IdleBox), CheckInMinutes = Number(CheckInMinutesBox), RecoveryDelaySeconds = Number(RecoveryDelayBox), RecoveryRate = Number(RecoveryRateBox),
+            ApplicationMode = (RuleMode)AppPolicyBox.SelectedIndex, WebsiteMode = (RuleMode)WebPolicyBox.SelectedIndex,
+            StrengthPreview = ReadStrength()
         };
         o.Validate();
         return o;
@@ -129,7 +149,8 @@ public partial class MainWindow : Window
             var foreground = NativeMonitor.Read();
             var now = DateTimeOffset.Now;
             var report = foreground.Browser != null ? bridge.Get(foreground.Browser, now) : null;
-            var attention = foreground.IsOwn ? Attention.Neutral : Rules.Evaluate(session.IsActive ? session.Rules : rules.ToList(), foreground.Path, report?.Url, foreground.Browser != null, report != null);
+            var policy = session.IsActive ? session.Options : settings.Options;
+            var attention = foreground.IsOwn ? Attention.Neutral : Rules.Evaluate(session.IsActive ? session.Rules : rules.ToList(), foreground.Path, report?.Url, foreground.Browser != null, report != null, policy.ApplicationMode, policy.WebsiteMode);
             CurrentAppLabel.Text = foreground.Name;
             // Show host only. Full URLs, tokens and query strings never enter the history or display.
             CurrentUrlLabel.Text = report != null && Rules.TryHost(report.Url, out var host) ? host : foreground.Browser != null ? "等待已配对扩展报告当前页面" : $"键鼠空闲 {Math.Floor(foreground.IdleSeconds)} 秒";
@@ -184,17 +205,22 @@ public partial class MainWindow : Window
         ThresholdLabel.Text = $"提醒线 {o.AlertThresholdSeconds:0} 秒 / 持续专注后逐渐消除";
         IncidentLabel.Text = $"{session.RecentCount(DateTimeOffset.Now)} 次分心";
         ReasonLabel.Text = session.StatusReason;
+        StrengthValueLabel.Text = $"{session.PreviewStrength:0.#} / {o.StrengthPreview.Maximum:0.#}";
+        StrengthBar.Maximum = Math.Max(1, o.StrengthPreview.Maximum); StrengthBar.Value = session.PreviewStrength;
         StartButton.Content = session.State switch { SessionState.Suspended => "继续本次会话", SessionState.Resting => "结束休息", SessionState.Focusing => "专注进行中", SessionState.ExitPending => "继续复习，等待退出", _ => "开始专注" };
         StartButton.IsEnabled = storage.LoadError == null && session.State is not (SessionState.Focusing or SessionState.ExitPending);
         ExitButton.IsEnabled = session.State is SessionState.Focusing or SessionState.Resting;
         ExitButton.Visibility = session.State == SessionState.ExitPending ? Visibility.Collapsed : Visibility.Visible;
         CancelExitButton.Visibility = session.State == SessionState.ExitPending ? Visibility.Visible : Visibility.Collapsed;
         CheckInPanel.Visibility = session.NeedsCheckIn ? Visibility.Visible : Visibility.Collapsed;
-        TemporaryButton.IsEnabled = session.IsActive && session.TemporaryHost == null;
+        TemporaryButton.IsEnabled = session.IsActive && session.TemporaryHost == null && o.WebsiteMode == RuleMode.Whitelist;
         TemporaryInput.IsEnabled = TemporaryButton.IsEnabled;
-        TemporaryLabel.Text = session.TemporaryHost != null ? $"本次临时允许：{session.TemporaryHost} · 剩余 0 个名额" : "每次会话可临时新增 1 个域名，仅本次有效。";
+        TemporaryLabel.Text = session.TemporaryHost != null ? $"本次临时允许：{session.TemporaryHost} · 剩余 0 个名额"
+            : o.WebsiteMode == RuleMode.Blacklist ? "网站黑名单模式：未命中的域名已允许，无需临时放行。" : "每次会话可临时新增 1 个域名，仅本次有效，黑名单优先。";
         AddAppButton.IsEnabled = BrowserRuleEditor.IsEnabled = SubdomainsBox.IsEnabled = SessionSettingsEditor.IsEnabled = !session.IsActive;
-        RuleLockLabel.Text = session.IsActive ? "当前会话规则已锁定。临时查询请在控制台添加唯一一个域名。" : rules.Count == 0 ? "还没有允许规则。纸笔模式可直接开始，其他模式至少添加一条。" : $"已配置 {rules.Count} 条规则。";
+        PolicyEditor.IsEnabled = AppRuleEditor.IsEnabled = StrengthSettingsEditor.IsEnabled = !session.IsActive;
+        var summary = $"白名单 {rules.Count(x => x.Action == RuleAction.Allow)} 条 · 黑名单 {rules.Count(x => x.Action == RuleAction.Block)} 条。";
+        RuleLockLabel.Text = summary + (session.IsActive ? "本次会话规则与模式已锁定。" : "黑名单始终优先，白名单模式下未列出内容算分心。");
         floating?.Update(stateText, Clock(seconds), session.State, session.NeedsCheckIn, session.DebtSeconds, o.AlertThresholdSeconds);
     }
     internal static string Clock(double seconds)
@@ -211,10 +237,11 @@ public partial class MainWindow : Window
     private void ShowPage(string name)
     {
         page = name;
+        PageScroll.ScrollToTop();
         foreach (FrameworkElement child in PageHost.Children) child.Visibility = child.Name == name ? Visibility.Visible : Visibility.Collapsed;
         (PageTitle.Text, PageSubtitle.Text) = name switch
         {
-            "RulesPage" => ("允许使用", "开始前配置完整；会话中仅补充一个临时域名。"),
+            "RulesPage" => ("黑白名单", "软件与网站分别配置，冲突时黑名单优先。"),
             "SettingsPage" => ("会话设置", "选择适合这一段学习的节奏。"),
             "DevicePage" => ("设备与浏览器", "所有专注判断在本机完成。"),
             "HistoryPage" => ("会话记录", "查看规则变化与提醒发生的时间。"),
@@ -251,7 +278,7 @@ public partial class MainWindow : Window
             lastTick = elapsed.Elapsed;
             ShowPage("FocusPage"); Save(); Refresh();
         }
-        catch (ArgumentException ex) { Notice(ex.Message); ShowPage(rules.Count == 0 ? "RulesPage" : "SettingsPage"); }
+        catch (ArgumentException ex) { Notice(ex.Message); ShowPage(!rules.Any(x => x.Action == RuleAction.Allow) ? "RulesPage" : "SettingsPage"); }
     }
     private void PresetClick(object sender, RoutedEventArgs e)
     {
@@ -269,6 +296,32 @@ public partial class MainWindow : Window
     {
         settings.Sound = SoundBox.IsChecked == true; settings.ReducedMotion = ReducedMotionBox.IsChecked == true;
         Save(); Refresh();
+    }
+    private void PolicyChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (initializing || session.IsActive || AppPolicyBox.SelectedIndex < 0 || WebPolicyBox.SelectedIndex < 0) return;
+        settings.Options = settings.Options with { ApplicationMode = (RuleMode)AppPolicyBox.SelectedIndex, WebsiteMode = (RuleMode)WebPolicyBox.SelectedIndex };
+        if (sender == AppPolicyBox) AppActionBox.SelectedIndex = AppPolicyBox.SelectedIndex;
+        if (sender == WebPolicyBox) WebActionBox.SelectedIndex = WebPolicyBox.SelectedIndex;
+        Save(); Refresh(); Notice("黑白名单模式已保存，下一次会话生效。");
+    }
+    private void StrengthTextChanged(object sender, TextChangedEventArgs e) => UpdateStrengthPreview();
+    private void StrengthInputChanged(object sender, RoutedEventArgs e) => UpdateStrengthPreview();
+    private void UpdateStrengthPreview()
+    {
+        if (initializing || RampChart == null) return;
+        try
+        {
+            var preview = ReadStrength(); preview.Validate();
+            StrengthValidationLabel.Foreground = (Brush)FindResource("Muted");
+            StrengthValidationLabel.Text = preview.Enabled ? "达到提醒线后的前五次递增预览；只在确定分心且超过宽限期时显示模拟强度。" : "曲线预览已关闭。启用后保存设置，在下一次会话生效。";
+            RampChart.Update(preview);
+        }
+        catch (ArgumentException ex)
+        {
+            StrengthValidationLabel.Foreground = (Brush)FindResource("Danger");
+            StrengthValidationLabel.Text = ex.Message; RampChart.Update(new());
+        }
     }
     private void ExitClick(object sender, RoutedEventArgs e) { session.RequestExit(DateTimeOffset.Now); Save(); ShowPage("FocusPage"); Refresh(); }
     private void CancelExitClick(object sender, RoutedEventArgs e) { session.CancelExit(DateTimeOffset.Now); Save(); Refresh(); }
@@ -288,20 +341,21 @@ public partial class MainWindow : Window
     private void AddAppClick(object sender, RoutedEventArgs e)
     {
         if (session.IsActive) return;
-        var picker = new OpenFileDialog { Filter = "Windows 程序 (*.exe)|*.exe", Title = "选择允许使用的软件" };
-        if (picker.ShowDialog(this) == true && Rules.TryCreate(RuleKind.Application, picker.FileName, false, out var rule)) AddRule(rule!);
+        var picker = new OpenFileDialog { Filter = "Windows 程序 (*.exe)|*.exe", Title = AppActionBox.SelectedIndex == 1 ? "选择加入黑名单的软件" : "选择加入白名单的软件" };
+        if (picker.ShowDialog(this) == true && Rules.TryCreate(RuleKind.Application, picker.FileName, false, out var rule))
+            AddRule(rule! with { Action = AppActionBox.SelectedIndex == 1 ? RuleAction.Block : RuleAction.Allow });
     }
     private void AddWebClick(object sender, RoutedEventArgs e)
     {
         if (session.IsActive) return;
         var kind = RuleKindBox.SelectedIndex switch { 1 => RuleKind.Page, 2 => RuleKind.PathPrefix, _ => RuleKind.Domain };
-        if (Rules.TryCreate(kind, RuleInput.Text, SubdomainsBox.IsChecked == true, out var rule)) { AddRule(rule!); RuleInput.Clear(); }
+        if (Rules.TryCreate(kind, RuleInput.Text, SubdomainsBox.IsChecked == true, out var rule)) { AddRule(rule! with { Action = WebActionBox.SelectedIndex == 1 ? RuleAction.Block : RuleAction.Allow }); RuleInput.Clear(); }
         else Notice("域名请输入 example.com，页面或路径规则请输入以 https:// 开头的完整地址。");
     }
     private void AddRule(AllowRule rule)
     {
         if (rules.Contains(rule)) { Notice("这条规则已经存在。"); return; }
-        rules.Add(rule); Save(); Refresh(); Notice("允许规则已添加。");
+        rules.Add(rule); Save(); Refresh(); Notice((rule.Action == RuleAction.Block ? "黑名单" : "白名单") + "规则已添加，黑名单始终优先。");
     }
     private void RemoveRuleClick(object sender, RoutedEventArgs e)
     {
@@ -436,8 +490,19 @@ public partial class MainWindow : Window
             rules.Add(new(RuleKind.Domain, "learn.example.com"));
             rules.Add(new(RuleKind.Page, "https://docs.example.com/course/lesson-1"));
             rules.Add(new(RuleKind.Application, @"C:\Program Files\StudyReader\StudyReader.exe"));
-            settings.Options = settings.Options with { Mode = StudyMode.Reading };
+            rules.Add(new(RuleKind.Domain, "games.example.com", false, RuleAction.Block));
+            rules.Add(new(RuleKind.Application, @"C:\Program Files\ExampleGame\Game.exe", false, RuleAction.Block));
+            settings.Options = settings.Options with { Mode = StudyMode.Reading,
+                StrengthPreview = new() { Enabled = true, Initial = 10, Maximum = 40, Increment = 5, IntervalSeconds = 30 } };
             LoadOptions();
+            ShowPage("SettingsPage");
+            await Dispatcher.InvokeAsync(() => { UpdateLayout(); Capture(folder, "StrengthSetup"); }, DispatcherPriority.ApplicationIdle);
+            StrengthMaximumBox.Text = "5";
+            SaveSettingsClick(this, new RoutedEventArgs());
+            if (settings.Options.StrengthPreview.Maximum != 40 || !StrengthValidationLabel.Text.Contains("上限"))
+                throw new InvalidOperationException("无效的模拟强度设置被保存。");
+            await Dispatcher.InvokeAsync(() => { UpdateLayout(); Capture(folder, "InvalidStrength"); }, DispatcherPriority.ApplicationIdle);
+            StrengthMaximumBox.Text = "40";
             StartClick(this, new RoutedEventArgs());
             for (int i = 0; i < 1120; i++) session.Tick(TimeSpan.FromSeconds(1), DateTimeOffset.Now, Attention.Allowed, 0);
             session.CheckIn(DateTimeOffset.Now);
@@ -447,7 +512,23 @@ public partial class MainWindow : Window
             DetectionLabel.Text = "允许的学习内容";
             Refresh();
             foreach (var name in new[] { "FocusPage", "RulesPage", "SettingsPage", "DevicePage", "HistoryPage" })
-            { ShowPage(name); await Dispatcher.InvokeAsync(() => { UpdateLayout(); Capture(folder, name); }, DispatcherPriority.ApplicationIdle); }
+            {
+                ShowPage(name); await Dispatcher.InvokeAsync(() => { UpdateLayout(); Capture(folder, name); }, DispatcherPriority.ApplicationIdle);
+                if (name == "RulesPage")
+                {
+                    PageScroll.ScrollToBottom();
+                    await Dispatcher.InvokeAsync(() => { UpdateLayout(); Capture(folder, "RuleEntries"); }, DispatcherPriority.ApplicationIdle);
+                }
+            }
+            ShowPage("FocusPage");
+            for (int i = 0; i < 110; i++) session.Tick(TimeSpan.FromSeconds(1), DateTimeOffset.Now, Attention.Outside, 0);
+            CurrentAppLabel.Text = "Example Game"; CurrentUrlLabel.Text = "示例软件黑名单"; DetectionLabel.Text = "当前内容不符合黑白名单";
+            Refresh();
+            if (session.PreviewStrength != 15) throw new InvalidOperationException("模拟强度验证失败。");
+            await Dispatcher.InvokeAsync(() => { UpdateLayout(); Capture(folder, "StrengthActive"); }, DispatcherPriority.ApplicationIdle);
+            session.Tick(TimeSpan.FromSeconds(1), DateTimeOffset.Now, Attention.Unknown, 0);
+            if (session.PreviewStrength != 0) throw new InvalidOperationException("未知状态未清除模拟强度。");
+            CurrentAppLabel.Text = "检测状态未知（示例）"; CurrentUrlLabel.Text = ""; DetectionLabel.Text = "检测状态未知";
             ExitClick(this, new RoutedEventArgs());
             await Dispatcher.InvokeAsync(() => { UpdateLayout(); Capture(folder, "ExitPending"); }, DispatcherPriority.ApplicationIdle);
             floating?.Capture(Path.Combine(folder, "Floating.png"));
@@ -455,7 +536,7 @@ public partial class MainWindow : Window
             floating?.Capture(Path.Combine(folder, "FloatingExpanded.png"));
             Width = 920; Height = 680;
             await Dispatcher.InvokeAsync(() => { UpdateLayout(); Capture(folder, "Compact"); }, DispatcherPriority.ApplicationIdle);
-            File.WriteAllText(Path.Combine(folder, "smoke-result.txt"), $"PASS: 5 pages, exit pending, floating window and compact layout rendered.\nNo device output or user settings used.\nRuntime: {RuntimeInformation.FrameworkDescription}\n");
+            File.WriteAllText(Path.Combine(folder, "smoke-result.txt"), $"PASS: 5 pages, blacklist entries, strength setup, validation, active simulation, exit, floating and compact layout rendered.\nInvalid strength settings rejected; unknown state cleared preview.\nNo device output or user settings used.\nRuntime: {RuntimeInformation.FrameworkDescription}\n");
         }
         catch (Exception e) { File.WriteAllText(Path.Combine(folder, "smoke-result.txt"), "FAIL: " + e); Environment.ExitCode = 1; }
         Quit();

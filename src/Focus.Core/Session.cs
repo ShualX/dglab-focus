@@ -8,6 +8,9 @@ public sealed record SessionOptions
     public double RestMinutes { get; init; } = 10;
     public bool Repeat { get; init; }
     public StudyMode Mode { get; init; }
+    public RuleMode ApplicationMode { get; init; }
+    public RuleMode WebsiteMode { get; init; }
+    public StrengthPreviewOptions StrengthPreview { get; init; } = new();
     public double GraceSeconds { get; init; } = 10;
     public double AlertThresholdSeconds { get; init; } = 60;
     public double RecoveryDelaySeconds { get; init; } = 120;
@@ -16,6 +19,10 @@ public sealed record SessionOptions
     public double CheckInMinutes { get; init; } = 15;
     public void Validate()
     {
+        if (!Enum.IsDefined(Mode) || !Enum.IsDefined(ApplicationMode) || !Enum.IsDefined(WebsiteMode))
+            throw new ArgumentException("请选择有效的学习方式与黑白名单模式。");
+        if (StrengthPreview == null) throw new ArgumentException("模拟强度设置无效。");
+        StrengthPreview.Validate();
         if (!double.IsFinite(FocusMinutes) || FocusMinutes < 0 || FocusMinutes > 1440
             || !double.IsFinite(RestMinutes) || RestMinutes < 0 || RestMinutes > 240
             || !double.IsFinite(GraceSeconds) || GraceSeconds < 1 || GraceSeconds > 300
@@ -66,6 +73,9 @@ public sealed class Session
     public event Action<SessionEvent>? Changed;
     private double outsideSeconds, recoverySeconds;
     private bool incidentCounted, alerted, restEndsSession;
+    private bool previewEligible;
+    public double PreviewStrength => previewEligible && !NeedsCheckIn && State is SessionState.Focusing or SessionState.ExitPending
+        ? Options.StrengthPreview.At(DebtSeconds, Options.AlertThresholdSeconds) : 0;
     public int RecentCount(DateTimeOffset now) => Incidents.Count(x => x > now.AddHours(-1) && x <= now);
 
     public void Start(SessionOptions options, IEnumerable<AllowRule> rules, DateTimeOffset now)
@@ -73,13 +83,15 @@ public sealed class Session
         if (IsActive) throw new InvalidOperationException("请先结束当前会话。");
         options.Validate();
         var copy = rules.ToList();
-        if (options.Mode != StudyMode.Paper && copy.Count == 0) throw new ArgumentException("请先添加至少一条允许规则。");
+        if (options.Mode != StudyMode.Paper && options.ApplicationMode == RuleMode.Whitelist && options.WebsiteMode == RuleMode.Whitelist
+            && !copy.Any(x => x.Action == RuleAction.Allow)) throw new ArgumentException("白名单模式请先添加至少一条白名单规则。");
         Options = options with { };
         Rules = copy;
         TemporaryHost = null;
         FocusSeconds = SegmentSeconds = DebtSeconds = SinceCheckIn = RestRemaining = ExitRemaining = 0;
         outsideSeconds = recoverySeconds = 0;
         NeedsCheckIn = incidentCounted = alerted = restEndsSession = false;
+        previewEligible = false;
         State = SessionState.Focusing;
         Emit(now, "start", "专注已开始。临时域名名额：1 个。");
     }
@@ -89,7 +101,11 @@ public sealed class Session
         if (!IsActive) { message = "请先开始专注。"; return false; }
         if (TemporaryHost != null) { message = "本次会话已使用临时域名名额，无法替换。"; return false; }
         if (!DglabFocus.Core.Rules.TryHost(value, out var host)) { message = "请输入完整的域名，例如 docs.example.com。"; return false; }
-        if (Rules.Any(x => DglabFocus.Core.Rules.MatchesUrl(x, "https://" + host + "/")))
+        if (Rules.Any(x => x.Action == RuleAction.Block && x.Kind == RuleKind.Domain
+            && DglabFocus.Core.Rules.MatchesUrl(x, "https://" + host + "/")))
+        { message = "这个域名命中黑名单，临时放行不能覆盖黑名单，未占用名额。"; return false; }
+        if (Options.WebsiteMode == RuleMode.Blacklist || Rules.Any(x => x.Action == RuleAction.Allow
+            && DglabFocus.Core.Rules.MatchesUrl(x, "https://" + host + "/")))
         { message = "这个域名已经允许使用，未占用名额。"; return false; }
         TemporaryHost = host;
         Rules.Add(new(RuleKind.Domain, host));
@@ -117,6 +133,7 @@ public sealed class Session
         if (!IsActive || State == SessionState.Suspended) return;
         ResumeState = State;
         State = SessionState.Suspended;
+        previewEligible = false;
         outsideSeconds = recoverySeconds = 0;
         NeedsCheckIn = false;
         StatusReason = reason;
@@ -126,6 +143,7 @@ public sealed class Session
     {
         if (State != SessionState.Suspended) return;
         State = ResumeState is SessionState.Focusing or SessionState.Resting or SessionState.ExitPending ? ResumeState : SessionState.Focusing;
+        previewEligible = false;
         SinceCheckIn = 0;
         Emit(now, "resumed", "已继续本次会话，临时域名名额保持原样。");
     }
@@ -139,6 +157,7 @@ public sealed class Session
     {
         if (State != SessionState.Focusing || Options.RestMinutes <= 0) return;
         State = SessionState.Resting;
+        previewEligible = false;
         RestRemaining = Options.RestMinutes * 60;
         restEndsSession = false;
         outsideSeconds = recoverySeconds = 0;
@@ -155,6 +174,7 @@ public sealed class Session
 
     public void Tick(TimeSpan delta, DateTimeOffset now, Attention attention, double idleSeconds)
     {
+        previewEligible = false;
         Incidents.RemoveAll(x => x <= now.AddHours(-1));
         if (!IsActive || State == SessionState.Suspended) return;
         var seconds = delta.TotalSeconds;
@@ -208,6 +228,7 @@ public sealed class Session
             recoverySeconds = 0;
             var before = outsideSeconds;
             outsideSeconds += seconds;
+            previewEligible = outsideSeconds > Options.GraceSeconds;
             var increment = Math.Max(0, outsideSeconds - Options.GraceSeconds) - Math.Max(0, before - Options.GraceSeconds);
             DebtSeconds += increment;
             if (!incidentCounted && outsideSeconds > Options.GraceSeconds)

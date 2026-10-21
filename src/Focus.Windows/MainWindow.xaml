@@ -32,12 +32,12 @@
             <TextBlock Text="STUDY ROOM" Style="{StaticResource Caption}" FontFamily="Bahnschrift" FontSize="11"/>
           </StackPanel>
           <StackPanel DockPanel.Dock="Bottom" Margin="12,12,0,0">
-            <TextBlock Text="WINDOWS · v0.1.0" Style="{StaticResource Caption}" FontFamily="Bahnschrift"/>
+            <TextBlock Text="WINDOWS · v0.2.0" Style="{StaticResource Caption}" FontFamily="Bahnschrift"/>
             <TextBlock Text="独立开源项目 / 模拟预览版" Style="{StaticResource Caption}" FontSize="11" Margin="0,6,0,0"/>
           </StackPanel>
           <StackPanel>
             <Button x:Name="NavFocus" Content="◉   专注控制台" Style="{StaticResource Nav}" Tag="FocusPage" Click="NavigateClick"/>
-            <Button Content="☷   允许使用" Style="{StaticResource Nav}" Tag="RulesPage" Click="NavigateClick"/>
+            <Button Content="☷   黑白名单" Style="{StaticResource Nav}" Tag="RulesPage" Click="NavigateClick"/>
             <Button Content="◷   会话设置" Style="{StaticResource Nav}" Tag="SettingsPage" Click="NavigateClick"/>
             <Button Content="⌁   设备与浏览器" Style="{StaticResource Nav}" Tag="DevicePage" Click="NavigateClick"/>
             <Button Content="≡   会话记录" Style="{StaticResource Nav}" Tag="HistoryPage" Click="NavigateClick"/>
@@ -66,7 +66,7 @@
             <TextBlock Text="●  模拟反馈 · 无设备输出" Foreground="{DynamicResource Accent}" FontSize="12"/>
           </Border>
         </Grid>
-        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="0,0,6,0">
+        <ScrollViewer x:Name="PageScroll" Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="0,0,6,0">
           <Grid x:Name="PageHost">
             <Grid x:Name="FocusPage">
               <Grid.RowDefinitions>
@@ -125,6 +125,11 @@
                         <TextBlock x:Name="IncidentLabel" Text="0 次分心" HorizontalAlignment="Right"/>
                       </Grid>
                       <TextBlock x:Name="FeedbackLabel" Text="反馈待命" Style="{StaticResource Caption}" Margin="0,12,0,0"/>
+                      <Grid Margin="0,16,0,0">
+                        <TextBlock Text="模拟强度" Style="{StaticResource Caption}"/>
+                        <TextBlock x:Name="StrengthValueLabel" Text="0 / 0" HorizontalAlignment="Right" Foreground="{DynamicResource Accent}"/>
+                      </Grid>
+                      <ProgressBar x:Name="StrengthBar" Height="4" Margin="0,10,0,0" Maximum="100" Foreground="{DynamicResource Accent}" Background="{DynamicResource Raised}" BorderThickness="0"/>
                     </StackPanel>
                   </Border>
                 </StackPanel>
@@ -160,9 +165,37 @@
             <StackPanel x:Name="RulesPage" Visibility="Collapsed">
               <Border Style="{StaticResource Card}" Margin="0,0,0,16">
                 <StackPanel>
-                  <TextBlock Text="允许使用的软件" Style="{StaticResource SectionTitle}"/>
+                  <TextBlock Text="默认匹配方式" Style="{StaticResource SectionTitle}"/>
+                  <UniformGrid x:Name="PolicyEditor" Columns="2">
+                    <StackPanel Margin="0,0,14,0">
+                      <TextBlock Text="软件" Style="{StaticResource Caption}" Margin="0,0,0,7"/>
+                      <ComboBox x:Name="AppPolicyBox" SelectedIndex="0" SelectionChanged="PolicyChanged" AutomationProperties.Name="软件黑白名单模式">
+                        <ComboBoxItem Content="白名单模式 · 未列出算分心"/>
+                        <ComboBoxItem Content="黑名单模式 · 仅黑名单算分心"/>
+                      </ComboBox>
+                    </StackPanel>
+                    <StackPanel>
+                      <TextBlock Text="Chrome / Edge 网站" Style="{StaticResource Caption}" Margin="0,0,0,7"/>
+                      <ComboBox x:Name="WebPolicyBox" SelectedIndex="0" SelectionChanged="PolicyChanged" AutomationProperties.Name="网站黑白名单模式">
+                        <ComboBoxItem Content="白名单模式 · 未列出算分心"/>
+                        <ComboBoxItem Content="黑名单模式 · 仅黑名单算分心"/>
+                      </ComboBox>
+                    </StackPanel>
+                  </UniformGrid>
+                  <TextBlock Text="黑名单始终优先。网页单独匹配；软件黑名单可以禁止整个浏览器。临时域名不能覆盖黑名单。" Style="{StaticResource Caption}" Margin="0,14,0,0"/>
+                </StackPanel>
+              </Border>
+              <Border Style="{StaticResource Card}" Margin="0,0,0,16">
+                <StackPanel>
+                  <TextBlock Text="软件黑白名单" Style="{StaticResource SectionTitle}"/>
                   <TextBlock Text="选取程序的 .exe 文件，按完整路径识别。开始后，规则保持到会话结束。" Style="{StaticResource Caption}" Margin="0,0,0,16"/>
-                  <Button Content="选取软件…" Click="AddAppClick" HorizontalAlignment="Left" x:Name="AddAppButton"/>
+                  <StackPanel x:Name="AppRuleEditor" Orientation="Horizontal">
+                    <ComboBox x:Name="AppActionBox" SelectedIndex="0" Width="160" Margin="0,0,12,0" AutomationProperties.Name="软件规则加入黑名单还是白名单">
+                      <ComboBoxItem Content="加入白名单"/>
+                      <ComboBoxItem Content="加入黑名单"/>
+                    </ComboBox>
+                    <Button Content="选取软件…" Click="AddAppClick" HorizontalAlignment="Left" x:Name="AddAppButton"/>
+                  </StackPanel>
                 </StackPanel>
               </Border>
               <Border Style="{StaticResource Card}" Margin="0,0,0,16">
@@ -171,34 +204,50 @@
                   <TextBlock Text="同时支持 Chrome 和 Edge，需要安装随附扩展。配置网页规则后，浏览器的软件规则不会绕过网页限制。" Style="{StaticResource Caption}" Margin="0,0,0,16"/>
                   <Grid x:Name="BrowserRuleEditor">
                     <Grid.ColumnDefinitions>
-                      <ColumnDefinition Width="150"/>
+                      <ColumnDefinition Width="130"/>
+                      <ColumnDefinition Width="130"/>
                       <ColumnDefinition/>
                       <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
-                    <ComboBox x:Name="RuleKindBox" SelectedIndex="0" AutomationProperties.Name="网页规则类型">
+                    <ComboBox x:Name="WebActionBox" SelectedIndex="0" Margin="0,0,10,0" AutomationProperties.Name="网站规则加入黑名单还是白名单">
+                      <ComboBoxItem Content="加入白名单"/>
+                      <ComboBoxItem Content="加入黑名单"/>
+                    </ComboBox>
+                    <ComboBox x:Name="RuleKindBox" Grid.Column="1" SelectedIndex="0" AutomationProperties.Name="网页规则类型">
                       <ComboBoxItem Content="整个域名"/>
                       <ComboBoxItem Content="仅此页面"/>
                       <ComboBoxItem Content="页面路径"/>
                     </ComboBox>
-                    <TextBox x:Name="RuleInput" Grid.Column="1" Margin="12,0" MaxLength="6000" AutomationProperties.Name="允许的网址或域名"/>
-                    <Button Grid.Column="2" Content="添加规则" Click="AddWebClick"/>
+                    <TextBox x:Name="RuleInput" Grid.Column="2" Margin="12,0" MaxLength="6000" AutomationProperties.Name="规则网址或域名"/>
+                    <Button Grid.Column="3" Content="添加规则" Click="AddWebClick"/>
                   </Grid>
                   <CheckBox x:Name="SubdomainsBox" Content="域名规则包含子域名" Margin="0,10,0,0"/>
                   <TextBlock Text="具体页面保留查询参数和 # 后的内容。路径规则按路径边界匹配，不包含其他域名。" Style="{StaticResource Caption}" FontSize="12" Margin="0,6,0,0"/>
                 </StackPanel>
               </Border>
               <TextBlock x:Name="RuleLockLabel" Style="{StaticResource Caption}" Margin="0,0,0,12"/>
-              <ListBox x:Name="RuleList" MaxHeight="420">
+              <ListBox x:Name="RuleList">
                 <ListBox.ItemTemplate>
                   <DataTemplate>
                     <Border Style="{StaticResource Card}" Padding="18" Margin="0,0,0,10">
                       <Grid>
                         <Grid.ColumnDefinitions>
-                          <ColumnDefinition Width="110"/>
+                          <ColumnDefinition Width="160"/>
                           <ColumnDefinition/>
                           <ColumnDefinition Width="Auto"/>
                         </Grid.ColumnDefinitions>
-                        <TextBlock Text="{Binding Label}" Foreground="{DynamicResource Accent}"/>
+                        <TextBlock Text="{Binding Label}">
+                          <TextBlock.Style>
+                            <Style TargetType="TextBlock">
+                              <Setter Property="Foreground" Value="{DynamicResource Accent}"/>
+                              <Style.Triggers>
+                                <DataTrigger Binding="{Binding IsBlocked}" Value="True">
+                                  <Setter Property="Foreground" Value="{DynamicResource Danger}"/>
+                                </DataTrigger>
+                              </Style.Triggers>
+                            </Style>
+                          </TextBlock.Style>
+                        </TextBlock>
                         <TextBlock Grid.Column="1" Text="{Binding Display}" Margin="8,0,12,0" ToolTip="{Binding Value}"/>
                         <Button Grid.Column="2" Content="移除" Click="RemoveRuleClick" Tag="{Binding}" Padding="12,6" MinHeight="34"/>
                       </Grid>
@@ -208,6 +257,36 @@
               </ListBox>
             </StackPanel>
             <StackPanel x:Name="SettingsPage" Visibility="Collapsed">
+              <Border Style="{StaticResource Card}" Margin="0,0,0,16">
+                <StackPanel>
+                  <TextBlock Text="模拟强度递增" Style="{StaticResource SectionTitle}"/>
+                  <TextBlock Text="达到累计分心提醒线后，按间隔增加模拟强度，到上限停止。仅为 0–100 的预览刻度，不对应电流或设备指令。" Style="{StaticResource Caption}" Margin="0,0,0,12"/>
+                  <StackPanel x:Name="StrengthSettingsEditor">
+                    <CheckBox x:Name="StrengthEnabledBox" Content="启用强度曲线预览（不发送电刺激）" Click="StrengthInputChanged"/>
+                    <UniformGrid Columns="4" Margin="0,12,0,0">
+                      <StackPanel Margin="0,0,12,0">
+                        <TextBlock Text="起始值" Style="{StaticResource Caption}"/>
+                        <TextBox x:Name="StrengthInitialBox" Text="0" Margin="0,7,0,0" TextChanged="StrengthTextChanged" AutomationProperties.Name="模拟强度起始值"/>
+                      </StackPanel>
+                      <StackPanel Margin="0,0,12,0">
+                        <TextBlock Text="上限" Style="{StaticResource Caption}"/>
+                        <TextBox x:Name="StrengthMaximumBox" Text="0" Margin="0,7,0,0" TextChanged="StrengthTextChanged" AutomationProperties.Name="模拟强度上限"/>
+                      </StackPanel>
+                      <StackPanel Margin="0,0,12,0">
+                        <TextBlock Text="每次递增" Style="{StaticResource Caption}"/>
+                        <TextBox x:Name="StrengthIncrementBox" Text="1" Margin="0,7,0,0" TextChanged="StrengthTextChanged" AutomationProperties.Name="模拟强度每次递增值"/>
+                      </StackPanel>
+                      <StackPanel>
+                        <TextBlock Text="递增间隔（秒）" Style="{StaticResource Caption}"/>
+                        <TextBox x:Name="StrengthIntervalBox" Text="30" Margin="0,7,0,0" TextChanged="StrengthTextChanged" AutomationProperties.Name="模拟强度递增间隔秒"/>
+                      </StackPanel>
+                    </UniformGrid>
+                    <TextBlock x:Name="StrengthValidationLabel" Style="{StaticResource Caption}" Margin="0,12,0,0"/>
+                    <local:StrengthChart x:Name="RampChart" Height="132" Margin="0,12,0,0" AutomationProperties.Name="达到提醒线后前五次递增的模拟强度曲线"/>
+                    <Button Content="保存强度与会话设置" Click="SaveSettingsClick" Style="{StaticResource Primary}" HorizontalAlignment="Left" Margin="0,12,0,0"/>
+                  </StackPanel>
+                </StackPanel>
+              </Border>
               <Border Style="{StaticResource Card}" Margin="0,0,0,16">
                 <StackPanel>
                   <TextBlock Text="会话节奏" Style="{StaticResource SectionTitle}"/>
