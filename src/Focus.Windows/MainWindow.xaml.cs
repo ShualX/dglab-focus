@@ -107,7 +107,7 @@ public partial class MainWindow : Window
         });
         timer.Tick += (_, _) => Tick();
         PreviewKeyDown += KeyDownHandler;
-        SizeChanged += (_, _) => { Dial.Height = ActualHeight < 760 ? 232 : 294; };
+        SizeChanged += (_, _) => { Dial.Height = ActualHeight < 760 ? 232 : 294; RunningAppList.MaxHeight = ActualHeight < 760 ? 160 : 228; };
         ApplyHighContrast();
         SystemParameters.StaticPropertyChanged += SystemPropertyChanged;
         if (smoke)
@@ -253,6 +253,8 @@ public partial class MainWindow : Window
         TemporaryLabel.Text = session.TemporaryHost != null ? $"本次临时允许：{session.TemporaryHost} · 剩余 0 个名额"
             : o.WebsiteMode == RuleMode.Blacklist ? "网站黑名单模式：未命中的域名已允许，无需临时放行。" : "每次会话可临时新增 1 个域名，仅本次有效，黑名单优先。";
         var editable = !session.IsActive && SelectedPlan != null;
+        if (appSelectionPlan != null && (!editable || appSelectionPlan != selectedPlanId)) CancelAppSelection();
+        RefreshApplicationSelectionControls();
         AddAppButton.IsEnabled = BrowserRuleEditor.IsEnabled = SubdomainsBox.IsEnabled = SessionSettingsEditor.IsEnabled = editable;
         PolicyEditor.IsEnabled = AppRuleEditor.IsEnabled = StrengthSettingsEditor.IsEnabled = editable;
         RefreshPlans();
@@ -274,6 +276,7 @@ public partial class MainWindow : Window
     }
     private void ShowPage(string name)
     {
+        if (name != "PlansPage") CancelAppSelection();
         page = name;
         PageScroll.ScrollToTop();
         foreach (FrameworkElement child in PageHost.Children) child.Visibility = child.Name == name ? Visibility.Visible : Visibility.Collapsed;
@@ -386,6 +389,7 @@ public partial class MainWindow : Window
     private void AddAppClick(object sender, RoutedEventArgs e)
     {
         if (session.IsActive || SelectedPlan == null) return;
+        CancelAppSelection();
         var picker = new OpenFileDialog { Filter = "Windows 程序 (*.exe)|*.exe", Title = AppActionBox.SelectedIndex == 1 ? "选择加入黑名单的软件" : "选择加入白名单的软件" };
         if (picker.ShowDialog(this) == true && Rules.TryCreate(RuleKind.Application, picker.FileName, false, out var rule))
             AddRule(rule! with { Action = AppActionBox.SelectedIndex == 1 ? RuleAction.Block : RuleAction.Allow });
@@ -400,7 +404,8 @@ public partial class MainWindow : Window
     private void AddRule(AllowRule rule)
     {
         if (session.IsActive || SelectedPlan == null) return;
-        if (rules.Contains(rule)) { Notice("这条规则已经存在。"); return; }
+        if (rules.Contains(rule) || rule.Kind == RuleKind.Application && rules.Any(x => x.Kind == RuleKind.Application && x.Action == rule.Action &&
+            string.Equals(x.Value, rule.Value, StringComparison.OrdinalIgnoreCase))) { Notice("这条规则已经存在。"); return; }
         rules.Add(rule); Save(); Refresh(); Notice((rule.Action == RuleAction.Block ? "黑名单" : "白名单") + "规则已添加，黑名单始终优先。");
     }
     private void RemoveRuleClick(object sender, RoutedEventArgs e)
@@ -476,6 +481,8 @@ public partial class MainWindow : Window
     }
     private void KeyDownHandler(object sender, KeyEventArgs e)
     {
+        if (e.Key == Key.Escape && appSelectionPlan != null)
+        { CancelAppSelectionClick(this, new RoutedEventArgs()); e.Handled = true; return; }
         if (Keyboard.Modifiers != ModifierKeys.Control) return;
         if (e.Key is Key.OemPlus or Key.Add) { ZoomInClick(sender, e); e.Handled = true; }
         if (e.Key is Key.OemMinus or Key.Subtract) { ZoomOutClick(sender, e); e.Handled = true; }
@@ -549,6 +556,7 @@ public partial class MainWindow : Window
     {
         if (closing) return;
         closing = true; timer.Stop(); Save();
+        CancelAppSelection();
         await device.DisconnectAsync();
         await StopLocalRelay();
         bridge.Dispose(); floating?.Close(); tray?.Dispose();
@@ -573,6 +581,7 @@ public partial class MainWindow : Window
             await Dispatcher.InvokeAsync(() => { UpdateLayout(); Capture(folder, "FocusNoPlan"); }, DispatcherPriority.ApplicationIdle);
             NewPlanClick(this, new RoutedEventArgs());
             if (StrengthEnabledBox.IsChecked != true) throw new InvalidOperationException("新方案没有默认启用曲线预览。");
+            await RunApplicationSelectionSmoke(folder, args);
             PlanNameBox.Text = "网课复习";
             rules.Add(new(RuleKind.Domain, "learn.example.com"));
             rules.Add(new(RuleKind.Page, "https://docs.example.com/course/lesson-1"));
@@ -621,6 +630,8 @@ public partial class MainWindow : Window
             DeviceFeedbackBox.IsChecked = false; SaveSettingsClick(this, new RoutedEventArgs());
             StartClick(this, new RoutedEventArgs());
             if (session.PlanId != firstId || session.PlanName != "网课复习") throw new InvalidOperationException("启动没有绑定选择的方案。");
+            CaptureNextWindowClick(this, new RoutedEventArgs()); ChooseRunningAppClick(this, new RoutedEventArgs());
+            if (appSelectionPlan != null || AppRuleEditor.IsEnabled) throw new InvalidOperationException("专注会话中仍能选择软件或修改名单。");
             PlanPicker.SelectedValue = secondId;
             if (selectedPlanId != firstId || session.PlanId != firstId || PlanPicker.SelectedValue as Guid? != firstId)
                 throw new InvalidOperationException("会话中可以切换方案。");
@@ -707,6 +718,7 @@ public partial class MainWindow : Window
             }
             File.WriteAllText(Path.Combine(folder, "smoke-result.txt"), $"PASS: empty plan library, required selection, create/copy/rename/delete/undo, isolated plan rules and timing, invalid edits block switching, active plan locked.\n5 pages, plan tabs, default strength curve, validation, active simulation, exit, floating and compact layouts rendered.\nUnknown state cleared preview. No physical devices or user settings used.\nRuntime: {RuntimeInformation.FrameworkDescription}\n");
             File.AppendAllText(Path.Combine(folder, "smoke-result.txt"), "PASS: built-in relay on loopback only: UI generates a QR and manual server address, locks network choices, disconnects and clears credentials. Wide and compact layouts rendered.\n");
+            File.AppendAllText(Path.Combine(folder, "smoke-result.txt"), File.ReadAllText(Path.Combine(folder, "app-selection-result.txt")));
             if (Array.IndexOf(args, "--device-test-relay") >= 0)
                 File.AppendAllText(Path.Combine(folder, "smoke-result.txt"), "PASS: local fake App only: UI authorization → selected plan → distraction → bounded V4 requests → emergency stop. No physical device connected.\n");
         }

@@ -37,7 +37,7 @@
             <TextBlock Text="STUDY ROOM" Style="{StaticResource Caption}" FontFamily="Bahnschrift" FontSize="11"/>
           </StackPanel>
           <StackPanel DockPanel.Dock="Bottom" Margin="12,12,0,0">
-            <TextBlock Text="WINDOWS · v0.4.1" Style="{StaticResource Caption}" FontFamily="Bahnschrift"/>
+            <TextBlock Text="WINDOWS · v0.4.2" Style="{StaticResource Caption}" FontFamily="Bahnschrift"/>
             <TextBlock Text="独立开源项目 / DG-LAB 4" Style="{StaticResource Caption}" FontSize="11" Margin="0,6,0,0"/>
           </StackPanel>
           <StackPanel>
@@ -239,13 +239,52 @@
               <Border Style="{StaticResource Card}" Margin="0,0,0,16">
                 <StackPanel>
                   <TextBlock Text="软件黑白名单" Style="{StaticResource SectionTitle}"/>
-                  <TextBlock Text="选取程序的 .exe 文件，按完整路径识别。开始后，规则保持到会话结束。" Style="{StaticResource Caption}" Margin="0,0,0,16"/>
-                  <StackPanel x:Name="AppRuleEditor" Orientation="Horizontal">
-                    <ComboBox x:Name="AppActionBox" SelectedIndex="0" Width="160" Margin="0,0,12,0" AutomationProperties.Name="软件规则加入黑名单还是白名单">
+                  <TextBlock Text="可选取 .exe、从运行中的软件选择，或捕获接下来激活的窗口。按完整程序路径识别，开始后规则锁定。" Style="{StaticResource Caption}" Margin="0,0,0,16"/>
+                  <StackPanel x:Name="AppRuleEditor">
+                    <ComboBox x:Name="AppActionBox" SelectedIndex="0" Width="160" HorizontalAlignment="Left" SelectionChanged="AppActionChanged" AutomationProperties.Name="软件规则加入黑名单还是白名单">
                       <ComboBoxItem Content="加入白名单"/>
                       <ComboBoxItem Content="加入黑名单"/>
                     </ComboBox>
-                    <Button Content="选取软件…" Click="AddAppClick" HorizontalAlignment="Left" x:Name="AddAppButton"/>
+                    <WrapPanel Margin="0,12,0,0">
+                      <Button Content="选择 .exe…" Click="AddAppClick" x:Name="AddAppButton" Margin="0,0,10,8"/>
+                      <Button Content="从运行中选择…" Click="ChooseRunningAppClick" x:Name="ChooseRunningAppButton" Margin="0,0,10,8"/>
+                      <Button Content="捕获下一个窗口" Click="CaptureNextWindowClick" x:Name="CaptureNextWindowButton" Margin="0,0,0,8"/>
+                    </WrapPanel>
+                    <Border x:Name="AppSelectionPanel" Visibility="Collapsed" Background="{DynamicResource Bg}" BorderBrush="{DynamicResource Line}" BorderThickness="1" CornerRadius="9" Padding="16" Margin="0,8,0,0">
+                      <StackPanel>
+                        <Grid>
+                          <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                          <TextBlock x:Name="AppSelectionStatus" Foreground="{DynamicResource Accent}" Margin="0,0,12,0" AutomationProperties.LiveSetting="Polite"/>
+                          <Button Grid.Column="1" Content="取消选择" Click="CancelAppSelectionClick" Padding="12,6" MinHeight="34"/>
+                        </Grid>
+                        <StackPanel x:Name="RunningPickerPanel" Visibility="Collapsed" Margin="0,14,0,0">
+                          <TextBlock Text="搜索名称、窗口标题或路径" Style="{StaticResource Caption}" Margin="0,0,0,7"/>
+                          <Grid>
+                            <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                            <TextBox x:Name="RunningAppSearch" TextChanged="RunningAppSearchChanged" AutomationProperties.Name="搜索软件名称、窗口标题或程序路径" ToolTip="搜索名称、窗口标题或路径"/>
+                            <Button x:Name="RefreshRunningAppsButton" Grid.Column="1" Content="刷新列表" Click="RefreshRunningAppsClick" Margin="10,0,0,0"/>
+                          </Grid>
+                          <ListBox x:Name="RunningAppList" Margin="0,12,0,0" MaxHeight="228" HorizontalContentAlignment="Stretch" ScrollViewer.HorizontalScrollBarVisibility="Disabled" SelectionChanged="RunningAppSelected" MouseDoubleClick="RunningAppDoubleClick" KeyDown="RunningAppListKeyDown" AutomationProperties.Name="当前有窗口的软件列表">
+                            <ListBox.ItemTemplate>
+                              <DataTemplate>
+                                <StackPanel Margin="10,8">
+                                  <TextBlock Text="{Binding Name}" FontWeight="SemiBold"/>
+                                  <TextBlock Text="{Binding Summary}" Style="{StaticResource Caption}" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" ToolTip="{Binding Windows}" Margin="0,4,0,0"/>
+                                  <TextBlock Text="{Binding Path}" Style="{StaticResource Caption}" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" ToolTip="{Binding Path}"/>
+                                </StackPanel>
+                              </DataTemplate>
+                            </ListBox.ItemTemplate>
+                          </ListBox>
+                          <TextBlock x:Name="RunningAppCountLabel" Style="{StaticResource Caption}" Margin="0,10,0,0"/>
+                        </StackPanel>
+                        <StackPanel x:Name="CapturedAppPanel" Visibility="Collapsed" Margin="0,14,0,0">
+                          <TextBlock x:Name="CapturedAppName" FontWeight="SemiBold"/>
+                          <TextBlock x:Name="CapturedAppTitle" Style="{StaticResource Caption}" Margin="0,4,0,0"/>
+                          <TextBox x:Name="CapturedAppPath" IsReadOnly="True" TextWrapping="Wrap" Margin="0,10,0,0" AutomationProperties.Name="捕获的软件完整路径"/>
+                        </StackPanel>
+                        <Button x:Name="ConfirmAppSelectionButton" Content="加入白名单" Click="ConfirmAppSelectionClick" Style="{StaticResource Primary}" HorizontalAlignment="Left" IsEnabled="False" Visibility="Collapsed" Margin="0,14,0,0"/>
+                      </StackPanel>
+                    </Border>
                   </StackPanel>
                 </StackPanel>
               </Border>

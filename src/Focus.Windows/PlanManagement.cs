@@ -48,6 +48,7 @@ public partial class MainWindow
 
     private void SelectPlan(Guid? id)
     {
+        CancelAppSelection();
         if (device.IsArmed) _ = device.StopAsync();
         selectedPlanId = id;
         var plan = SelectedPlan;
@@ -155,6 +156,7 @@ public partial class MainWindow
     private void PlanTabClick(object sender, RoutedEventArgs e) => ShowPlanTab((string)((Button)sender).Tag);
     private void ShowPlanTab(string name)
     {
+        if (name != "RulesEditor") CancelAppSelection();
         foreach (var panel in new[] { RulesEditor, RhythmEditor, StrengthEditor })
             panel.Visibility = panel.Name == name ? Visibility.Visible : Visibility.Collapsed;
         foreach (var button in new[] { PlanTabRules, PlanTabRhythm, PlanTabStrength })

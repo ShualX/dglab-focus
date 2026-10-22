@@ -22,10 +22,11 @@ public static class NativeMonitor
         try
         {
             using var process = Process.GetProcessById((int)pid);
-            var name = process.ProcessName;
+            var path = RunningApplications.ExecutableForWindow(hwnd);
+            var name = path == null ? process.ProcessName : System.IO.Path.GetFileNameWithoutExtension(path);
             var browser = name.Equals("chrome", StringComparison.OrdinalIgnoreCase) ? "Chrome"
                 : name.Equals("msedge", StringComparison.OrdinalIgnoreCase) ? "Edge" : null;
-            return new(process.MainModule?.FileName, name, false, browser, idle);
+            return new(path, name, false, browser, idle);
         }
         catch (Exception e) when (e is System.ComponentModel.Win32Exception or InvalidOperationException or ArgumentException)
         { return new(null, "窗口访问受限", false, null, idle); }

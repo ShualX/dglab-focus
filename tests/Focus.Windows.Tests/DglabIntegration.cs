@@ -139,18 +139,39 @@ internal static class DglabIntegration
             var exe = Path.Combine(AppContext.BaseDirectory, "DglabFocus.exe");
             var preserve = Environment.GetEnvironmentVariable("DGLAB_UI_TEST_CAPTURE");
             var folder = preserve ?? Path.Combine(Path.GetTempPath(), "DglabFocus-device-ui-" + Guid.NewGuid().ToString("N"));
+            using var fixture = new ApplicationWindowFixture();
+            ApplicationWindowFixture.CheckNative(fixture, assert);
+            Directory.CreateDirectory(folder);
+            var activationRequest = Path.Combine(folder, "window-capture-request");
+            if (File.Exists(activationRequest)) File.Delete(activationRequest);
             var launch = new ProcessStartInfo(exe) { UseShellExecute = false, WindowStyle = ProcessWindowStyle.Hidden };
-            foreach (var arg in new[] { "--smoke-test", "--device-test-relay", app.Address.ToString(), "--capture-dir", folder }) launch.ArgumentList.Add(arg);
+            foreach (var arg in new[] { "--smoke-test", "--device-test-relay", app.Address.ToString(), "--capture-dir", folder,
+                "--app-picker-fixture", fixture.Handle.ToInt64().ToString(), "--fixture-executable", Environment.ProcessPath! }) launch.ArgumentList.Add(arg);
             using var process = Process.Start(launch) ?? throw new Exception("Could not start UI test host");
+            using var notificationStop = new CancellationTokenSource();
+            var notificationTask = Task.Run(async () =>
+            {
+                try
+                {
+                    while (!notificationStop.IsCancellationRequested)
+                    {
+                        if (File.Exists(activationRequest)) { File.Delete(activationRequest); fixture.NotifyActivation(); }
+                        await Task.Delay(30, notificationStop.Token);
+                    }
+                }
+                catch (OperationCanceledException) { }
+            });
             try
             {
                 await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(25));
                 var result = File.ReadAllText(Path.Combine(folder, "smoke-result.txt"));
                 assert(process.ExitCode == 0 && result.Contains("UI authorization"), "Windows UI connects a local fake App, arms, starts its plan, emits bounded requests and stops immediately: " + (process.ExitCode == 0 ? "PASS" : result));
+                assert(result.Contains("native window activation"), "Windows UI enumerates two fixture windows, merges them, captures a real WinEvent notification and applies its executable rule");
             }
             finally
             {
                 if (!process.HasExited) process.Kill();
+                notificationStop.Cancel(); await notificationTask;
                 if (preserve == null && Directory.Exists(folder)) Directory.Delete(folder, true);
             }
         }

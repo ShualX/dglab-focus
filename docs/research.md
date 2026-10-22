@@ -19,4 +19,6 @@ v0.4.1 按 [官方 V4 中继消息说明](https://github.com/dungeonlab-open/dgl
 
 Win32 通过 [GetForegroundWindow](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-getforegroundwindow) 获取前台窗口，通过 [GetLastInputInfo](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-getlastinputinfo) 获取最近输入时间，无需键盘内容钩子。
 
+软件选择使用 [EnumWindows](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-enumwindows) 枚举窗口，再用 [QueryFullProcessImageName](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-queryfullprocessimagenamew) 和受限查询权限读取完整程序路径。前台识别与选择共用路径解析，托管 Store 应用仅在能解析到实际应用进程时返回结果，避免把宿主程序作为通用放行项。窗口捕获通过 [SetWinEventHook](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-setwineventhook) 监听前台激活事件，使用进程外回调，取消后解除监听。没有键盘钩子或输入内容采集。
+
 [Chrome Tabs API](https://developer.chrome.com/docs/extensions/reference/api/tabs) 的 active 标签与窗口 focused 不等价。扩展报告窗口焦点，桌面端再结合 Win32 前台进程判断。多个配置文件同时报告焦点时，当前版本选择未知，避免猜测。MV3 的 WebSocket 保活依据 [Chrome 官方说明](https://developer.chrome.com/docs/extensions/how-to/web-platform/websockets)，每 5 秒发送报告并保留重连闹钟。
