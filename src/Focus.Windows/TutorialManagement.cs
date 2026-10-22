@@ -23,6 +23,7 @@ public partial class MainWindow
     private void TutorialExpandClick(object sender, RoutedEventArgs e) => OpenTutorial(false);
     private void OpenTutorial(bool restart)
     {
+        unavailableActions.Close();
         if (TutorialOverlay.Visibility == Visibility.Visible) { TutorialNextButton.Focus(); return; }
         if (restart) settings.Tutorial.Restart();
         settings.Tutorial.Normalize();
@@ -47,7 +48,7 @@ public partial class MainWindow
         var counter = $"第 {settings.Tutorial.Step + 1} / {TutorialGuide.Steps.Count} 步";
         TutorialCounter.Text = counter + " · 可随时跳过";
         TutorialTitle.Text = step.Title; TutorialSummary.Text = step.Summary;
-        TutorialInstructions.Text = string.Join("\n\n", step.Instructions.Select((text, index) => $"{index + 1}. {text}"));
+        TutorialInstructions.Text = string.Join("\n", step.Instructions.Select((text, index) => $"{index + 1}. {text}"));
         TutorialTip.Text = step.Tip;
         TutorialActionButton.Content = step.Action;
         TutorialActionButton.Visibility = step.Action.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
@@ -67,13 +68,8 @@ public partial class MainWindow
             : "会话进行中，设置已锁定；立即停电始终可用。"
             : settings.Tutorial.Step switch
             {
-                0 => "可先体验模拟模式。",
-                1 => plan == null ? "尚未选择方案，请先新建或选择。" : $"当前方案：{plan.Name}。",
-                2 => plan == null ? "请先创建或选择方案。" : $"已保存 {plan.Rules.Count} 条规则。",
-                3 => bridge.ConnectionCount(DateTimeOffset.Now) > 0 ? "扩展已连接，请到控制台核对网页判断。" : "尚未收到扩展报告，请检查浏览器加载。",
-                4 => plan == null ? "请先创建或选择方案。" : $"已保存：延迟 {plan.Options.GraceSeconds:0.##} 秒，{(plan.Options.HardMode ? "狠心模式" : "普通模式")}。",
-                5 => plan == null ? "请先创建或选择方案。" : plan.Options.DeviceFeedback ? "当前方案使用真实反馈，开始前需授权。" : "当前方案只模拟。",
-                6 => device.IsArmed ? "本次设备已授权。" : device.Devices.Count > 0 ? "已发现设备，核对通道和上限后授权。" : "未发现设备，可以先跳过。",
+                0 => plan == null ? "请先新建或选择方案。" : $"当前方案：{plan.Name} · {plan.Rules.Count} 条规则。",
+                1 => device.IsArmed ? "本次设备已授权。" : plan?.Options.DeviceFeedback != true ? "当前使用模拟模式，可以跳过。" : "真实反馈需连接设备并授权。",
                 _ => plan == null ? "请选择方案后开始。" : "完成教程后可开始专注。"
             };
         TutorialStatusLabel.Text = TutorialDockStatus.Text = text;

@@ -44,6 +44,9 @@ try
     var invalidTutorialStep = new AppSettings { Tutorial = new() { Step = int.MaxValue } }; invalidTutorialStep.InitializePlans();
     Assert(legacyTutorial.Tutorial.ShowAutomatically && damagedTutorial.Tutorial.Step == 0 && invalidTutorialStep.Tutorial.Step == TutorialGuide.Steps.Count - 1,
         "legacy and optional malformed tutorial metadata recover without losing application settings");
+    var oldLongTutorial = new AppSettings { Tutorial = new() { Step = 6, Dismissed = true } }; oldLongTutorial.InitializePlans();
+    Assert(TutorialGuide.Steps.Count == 3 && oldLongTutorial.Tutorial.Step == 2 && !oldLongTutorial.Tutorial.ShowAutomatically,
+        "the shorter tutorial preserves an older skipped guide without prompting again and clamps obsolete steps");
     var oldIdle = new SessionOptions { IdleSeconds = 180, IdlePolicy = IdlePolicy.ConfirmOnly };
     var oldIdleSettings = new AppSettings { Options = oldIdle, Plans = [new() { Options = oldIdle }], Session = new() { Options = oldIdle, State = SessionState.Suspended } };
     oldIdleSettings.InitializePlans();

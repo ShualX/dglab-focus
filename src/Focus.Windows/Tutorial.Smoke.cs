@@ -14,6 +14,11 @@ public partial class MainWindow
         if (TutorialOverlay.Visibility != Visibility.Visible || settings.Tutorial.Step != 0 || MainContentPanel.IsEnabled || SessionMenu.IsEnabled || session.IsActive || device.IsArmed)
             throw new InvalidOperationException("首次启动教程没有弹出，或教程触发了专注及设备授权。");
         await Dispatcher.InvokeAsync(() => { UpdateLayout(); Capture(folder, "TutorialWelcome"); }, DispatcherPriority.ApplicationIdle);
+        await CheckUnavailableAction(TutorialBackButton, "第一步", folder, "TutorialFirstStepReason");
+        TutorialActionClick(this, new RoutedEventArgs());
+        if (page != "PlansPage" || TutorialDock.Visibility != Visibility.Visible)
+            throw new InvalidOperationException("必要步骤第一步不能前往方案设置。");
+        TutorialExpandClick(this, new RoutedEventArgs());
         TutorialNextClick(this, new RoutedEventArgs());
         TutorialBackClick(this, new RoutedEventArgs());
         if (settings.Tutorial.Step != 0) throw new InvalidOperationException("教程不能返回上一步。");
@@ -32,8 +37,8 @@ public partial class MainWindow
             await Dispatcher.InvokeAsync(() => { UpdateLayout(); }, DispatcherPriority.ApplicationIdle);
             if (TutorialOverlay.Visibility != Visibility.Collapsed || TutorialDock.Visibility != Visibility.Visible || page != CurrentTutorialStep.Page || !MainContentPanel.IsEnabled)
                 throw new InvalidOperationException("教程未能收成底部提示卡或跳转到对应设置。");
-            if (i == 3)
-                await Dispatcher.InvokeAsync(() => { UpdateLayout(); Capture(folder, "TutorialBrowserDockCompact"); }, DispatcherPriority.ApplicationIdle);
+            if (i == 1)
+                await Dispatcher.InvokeAsync(() => { UpdateLayout(); Capture(folder, "TutorialDeviceDockCompact"); }, DispatcherPriority.ApplicationIdle);
             TutorialExpandClick(this, new RoutedEventArgs());
             if (settings.Tutorial.Step != i) throw new InvalidOperationException("恢复教程丢失了当前步骤。");
         }
@@ -64,6 +69,6 @@ public partial class MainWindow
             throw new InvalidOperationException("教程修改了用户的方案、名单、偏好或设备授权。");
         settings.Tutorial.Restart(); settings.Tutorial.Finish();
         ShowPage("FocusPage"); Refresh();
-        File.WriteAllText(Path.Combine(folder, "tutorial-result.txt"), "PASS: first-run tutorial, all eight steps, back/next, settings destinations, compact dock, completion, optional skip, help replay and zoomed layout. No plans, rules, preferences or output authorization changed.\n");
+        File.WriteAllText(Path.Combine(folder, "tutorial-result.txt"), "PASS: first-run tutorial, three essential steps, back/next, settings destinations, compact dock, completion, optional skip, help replay and zoomed layout. No plans, rules, preferences or output authorization changed.\n");
     }
 }

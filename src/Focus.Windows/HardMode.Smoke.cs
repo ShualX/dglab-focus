@@ -29,13 +29,25 @@ public partial class MainWindow
         if (floating?.FindName("ExitButton") is not System.Windows.Controls.Button { IsEnabled: false })
             throw new InvalidOperationException("狠心模式悬浮球仍允许提前退出。");
         await Dispatcher.InvokeAsync(() => { UpdateLayout(); Capture(folder, "HardModeActiveCompact"); }, DispatcherPriority.ApplicationIdle);
+        await CheckUnavailableAction(ExitButton, "狠心模式", folder, "UnavailableHardMode");
+        SessionMenu.IsSubmenuOpen = true;
+        await CheckUnavailableAction(ExitMenuItem, "狠心模式", folder, "UnavailableMenuExit");
+        SessionMenu.IsSubmenuOpen = false;
+        floating!.Expand(); floating.UpdateLayout();
+        var floatingExit = (System.Windows.Controls.Button)floating.FindName("ExitButton");
+        var floatingPoint = floatingExit.TranslatePoint(new Point(floatingExit.ActualWidth / 2, floatingExit.ActualHeight / 2), floating);
+        if (!floating.UnavailableActions.TryExplainAt(floating, floatingPoint) || !floating.UnavailableActions.Message.Contains("狠心模式"))
+            throw new InvalidOperationException("悬浮球的禁用退出按钮没有解释原因。");
+        floating.UnavailableActions.Close();
         for (int i = 0; i < 10; i++) session.Tick(TimeSpan.FromSeconds(1), DateTimeOffset.Now, Attention.Outside, 0);
         Refresh();
         if (session.PreviewStrength <= 0) throw new InvalidOperationException("狠心模式没有遵循启动延迟。");
         TutorialMenuClick(this, new RoutedEventArgs());
         if (TutorialEmergencyButton.Visibility != Visibility.Visible || !session.IsHardModeLocked || session.State != SessionState.Focusing)
             throw new InvalidOperationException("锁定会话中的教程隐藏了急停入口或修改了会话。");
-        TutorialEmergencyClick(this, new RoutedEventArgs());
+        unavailableActions.Show(TutorialBackButton, "已经是教程第一步。");
+        TutorialEmergencyButton.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
+        if (unavailableActions.IsOpen) throw new InvalidOperationException("急停没有关闭原因提示。");
         if (!TutorialLiveStatusLabel.Text.Contains("会话已暂停") || TutorialLiveStatusLabel.Visibility != Visibility.Visible)
             throw new InvalidOperationException("教程急停结果没有在固定操作区显示。");
         await Dispatcher.InvokeAsync(() => { UpdateLayout(); Capture(folder, "TutorialHardModeEmergency"); }, DispatcherPriority.ApplicationIdle);

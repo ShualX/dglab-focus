@@ -60,7 +60,7 @@ public partial class MainWindow
     }
     private async void ChooseRunningAppClick(object sender, RoutedEventArgs e)
     {
-        if (!CanSelectApplication) return;
+        if (!CanSelectApplication) { ExplainUnavailableAction(sender, PlanEditReason); return; }
         BeginAppSelection(); RunningPickerPanel.Visibility = ConfirmAppSelectionButton.Visibility = Visibility.Visible;
         await LoadRunningApps();
         if (RunningPickerPanel.Visibility == Visibility.Visible) RunningAppSearch.Focus();
@@ -113,7 +113,7 @@ public partial class MainWindow
     { CancelAppSelection(); Notice("已取消软件选择，名单未修改。"); }
     private void CaptureNextWindowClick(object sender, RoutedEventArgs e)
     {
-        if (!CanSelectApplication) return;
+        if (!CanSelectApplication) { ExplainUnavailableAction(sender, PlanEditReason); return; }
         BeginAppSelection(); windowCaptureStarted = Stopwatch.GetTimestamp();
         try
         {
@@ -159,9 +159,10 @@ public partial class MainWindow
     { if (e.Key == Key.Enter && RunningAppList.SelectedItem != null) { ConfirmAppSelectionClick(sender, new RoutedEventArgs()); e.Handled = true; } }
     private void ConfirmAppSelectionClick(object sender, RoutedEventArgs e)
     {
-        if (!CanSelectApplication || appSelectionPlan != selectedPlanId) { CancelAppSelection(); return; }
+        if (!CanSelectApplication || appSelectionPlan != selectedPlanId)
+        { var reason = UnavailableReason([ConfirmAppSelectionButton]); CancelAppSelection(); ExplainUnavailableAction(sender, reason); return; }
         var path = capturedAppPath ?? (RunningAppList.SelectedItem as RunningApplication)?.Path;
-        if (path == null) return;
+        if (path == null) { ExplainUnavailableAction(sender, UnavailableReason([ConfirmAppSelectionButton])); return; }
         var action = appSelectionAction;
         CancelAppSelection();
         if (Rules.TryCreate(RuleKind.Application, path, false, out var rule)) AddRule(rule! with { Action = action });

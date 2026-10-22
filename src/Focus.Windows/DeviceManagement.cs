@@ -47,7 +47,7 @@ public partial class MainWindow
     private void RefreshLanClick(object sender, RoutedEventArgs e) => RefreshLanAddresses();
     private void CopyPairingAddressClick(object sender, RoutedEventArgs e)
     {
-        if (device.PairingSocketUrl is not { } address || !device.IsConnected) { ClearPairing(); return; }
+        if (device.PairingSocketUrl is not { } address || !device.IsConnected) { ClearPairing(); ExplainUnavailableAction(sender, "配对地址已失效，请重新生成二维码后再复制。"); return; }
         try { Clipboard.SetText(address); Notice("服务器地址已复制。在 DG-LAB App 的服务器地址输入框中粘贴即可。"); }
         catch (System.Runtime.InteropServices.COMException) { Notice("剪贴板正被占用，请稍后重试。"); }
     }
@@ -94,10 +94,11 @@ public partial class MainWindow
     }
     private async void ArmDeviceClick(object sender, RoutedEventArgs e)
     {
-        if (armingDevice || DevicePicker.SelectedItem is not DglabDevice selected) return;
+        if (armingDevice || DevicePicker.SelectedItem is not DglabDevice) { ExplainUnavailableAction(sender, DeviceAuthorizationReason()); return; }
+        var selected = (DglabDevice)DevicePicker.SelectedItem;
         var options = session.IsActive ? session.Options : SelectedPlan?.Options;
-        if (options?.DeviceFeedback != true) { Notice("请先保存一个启用真实设备反馈的方案。"); return; }
-        if (!int.TryParse(DeviceCapBox.Text, out var cap)) { Notice("请填写有效的设备上限整数。"); return; }
+        if (options?.DeviceFeedback != true) { ExplainUnavailableAction(sender, "请先保存一个启用真实设备反馈的方案。"); return; }
+        if (!int.TryParse(DeviceCapBox.Text, out var cap)) { ExplainUnavailableAction(sender, "请填写有效的设备上限整数。"); return; }
         armingDevice = true; RefreshDeviceControls();
         try
         {
@@ -105,7 +106,7 @@ public partial class MainWindow
             Notice("本次设备已授权。开始或继续专注后，仅在满足分心条件时按方案输出。");
         }
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or OperationCanceledException or TimeoutException or WebSocketException or IOException)
-        { Notice("未授权：" + ex.Message); }
+        { ExplainUnavailableAction(sender, "未授权：" + ex.Message); }
         finally { armingDevice = false; RefreshDeviceControls(); }
     }
     private async void StopDeviceClick(object sender, RoutedEventArgs e)
@@ -117,7 +118,11 @@ public partial class MainWindow
     { if (!initializing && !refreshingDevices) RefreshDeviceControls(); }
     private void DeviceCapChanged(object sender, TextChangedEventArgs e)
     { if (!initializing) RefreshDeviceControls(); }
-    private async void RefreshDevicesClick(object sender, RoutedEventArgs e) => await device.RefreshDevicesAsync();
+    private async void RefreshDevicesClick(object sender, RoutedEventArgs e)
+    {
+        if (!device.IsConnected) { ExplainUnavailableAction(sender, "尚未连接 DG-LAB App，请先生成配对二维码并扫码连接。"); return; }
+        await device.RefreshDevicesAsync();
+    }
 
     private static string ExtensionDirectory()
     {

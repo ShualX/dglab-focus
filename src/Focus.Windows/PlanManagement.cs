@@ -72,7 +72,7 @@ public partial class MainWindow
             SelectPlan(next?.Id);
             Notice(next == null ? "请选择一个方案后开始专注。" : "已选择方案：" + next.Name);
         }
-        catch (ArgumentException ex) { SyncPlanPickers(); Notice("当前方案尚未切换：" + ex.Message); }
+        catch (ArgumentException ex) { SyncPlanPickers(); ExplainUnavailableAction(sender, "当前方案尚未切换：" + ex.Message); }
     }
 
     private string NewPlanName(string prefix)
@@ -85,7 +85,7 @@ public partial class MainWindow
 
     private void NewPlanClick(object sender, RoutedEventArgs e)
     {
-        if (session.IsActive) return;
+        if (session.IsActive) { ExplainUnavailableAction(sender, PlanEditReason); return; }
         try
         {
             if (SelectedPlan != null) CommitSelectedPlan();
@@ -95,12 +95,12 @@ public partial class MainWindow
             PlanNameBox.Focus(); PlanNameBox.SelectAll();
             Notice("已创建方案。配置黑白名单后即可开始专注，强度曲线预览默认开启。");
         }
-        catch (ArgumentException ex) { Notice(ex.Message); }
+        catch (ArgumentException ex) { ExplainUnavailableAction(sender, ex.Message); }
     }
 
     private void CopyPlanClick(object sender, RoutedEventArgs e)
     {
-        if (session.IsActive || SelectedPlan == null) return;
+        if (session.IsActive || SelectedPlan == null) { ExplainUnavailableAction(sender, PlanEditReason); return; }
         try
         {
             CommitSelectedPlan();
@@ -108,12 +108,12 @@ public partial class MainWindow
             initializing = true; plans.Add(copy); initializing = false;
             SelectPlan(copy.Id); Notice("已复制方案。修改副本不会影响原方案。");
         }
-        catch (ArgumentException ex) { Notice(ex.Message); }
+        catch (ArgumentException ex) { ExplainUnavailableAction(sender, ex.Message); }
     }
 
     private void DeletePlanClick(object sender, RoutedEventArgs e)
     {
-        if (session.IsActive || SelectedPlan == null) return;
+        if (session.IsActive || SelectedPlan == null) { ExplainUnavailableAction(sender, PlanEditReason); return; }
         deletedPlan = SelectedPlan;
         initializing = true; plans.Remove(deletedPlan); initializing = false;
         SelectPlan(null); Notice("已删除方案，可点击「撤销删除」恢复。请重新选择方案后开始专注。");
@@ -121,7 +121,7 @@ public partial class MainWindow
 
     private void UndoDeletePlanClick(object sender, RoutedEventArgs e)
     {
-        if (session.IsActive || deletedPlan == null) return;
+        if (session.IsActive || deletedPlan == null) { ExplainUnavailableAction(sender, session.IsActive ? PlanEditReason : "当前没有可撤销的删除操作。"); return; }
         try
         {
             if (SelectedPlan != null) CommitSelectedPlan();
@@ -129,7 +129,7 @@ public partial class MainWindow
             initializing = true; plans.Add(restored); initializing = false;
             SelectPlan(restored.Id); Notice("已恢复删除的方案。");
         }
-        catch (ArgumentException ex) { Notice(ex.Message); }
+        catch (ArgumentException ex) { ExplainUnavailableAction(sender, ex.Message); }
     }
 
     private void RefreshPlans()

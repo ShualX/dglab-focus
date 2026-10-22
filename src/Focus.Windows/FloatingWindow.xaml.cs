@@ -10,7 +10,15 @@ public partial class FloatingWindow : Window
 {
     public event Action? OpenRequested, ExitRequested, CancelRequested, StopRequested, CheckInRequested;
     private SessionState state;
-    public FloatingWindow() { InitializeComponent(); }
+    private bool hardModeLocked;
+    internal UnavailableActionFeedback UnavailableActions { get; }
+    public FloatingWindow()
+    {
+        InitializeComponent();
+        UnavailableActions = new(this, _ => hardModeLocked
+            ? "狠心模式会在约定时间结束，不能提前退出。需要停止输出时，请点击「立即停电」。"
+            : "当前没有可退出的专注会话。请先开始或继续专注。", SetMessage);
+    }
     private void OnLoaded(object sender, RoutedEventArgs e)
     {
         var area = SystemParameters.WorkArea;
@@ -19,6 +27,7 @@ public partial class FloatingWindow : Window
     public void Update(string label, string time, SessionState value, bool needsCheckIn, bool hardMode)
     {
         state = value;
+        hardModeLocked = hardMode;
         StateLabel.Text = label + (hardMode ? " · 狠心" : ""); TimeLabel.Text = BallTimeLabel.Text = time;
         ExitButton.Content = hardMode ? "到时自动结束" : value == SessionState.ExitPending ? "取消退出" : "申请退出";
         ExitButton.IsEnabled = !hardMode && value is SessionState.Focusing or SessionState.Resting or SessionState.ExitPending;

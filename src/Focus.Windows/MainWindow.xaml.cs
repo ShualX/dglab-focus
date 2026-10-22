@@ -66,6 +66,8 @@ public partial class MainWindow : Window
         history = new(settings.History.Take(200));
         bridge = new(settings.BridgeToken);
         InitializeComponent();
+        unavailableActions = new(this, UnavailableReason, Notice, () => zoom);
+        unavailableActions.IncludeMenu(SessionMenu);
         Icon = BitmapFrame.Create(new Uri("pack://application:,,,/Assets/focus.ico"));
         RuleList.ItemsSource = rules;
         FocusPlanPicker.ItemsSource = PlanPicker.ItemsSource = plans;
@@ -291,6 +293,7 @@ public partial class MainWindow : Window
     }
     private void ShowPage(string name)
     {
+        unavailableActions.Close();
         if (name != "PlansPage") CancelAppSelection();
         page = name;
         PageScroll.ScrollToTop();
@@ -323,20 +326,22 @@ public partial class MainWindow : Window
     private void NavigateClick(object sender, RoutedEventArgs e) => ShowPage((string)((Button)sender).Tag);
     private void StartClick(object sender, RoutedEventArgs e)
     {
-        if (storage.LoadError != null) { Notice(storage.LoadError); return; }
+        if (storage.LoadError != null) { ExplainUnavailableAction(sender, storage.LoadError); return; }
+        if (session.State is SessionState.Focusing or SessionState.ExitPending)
+        { ExplainUnavailableAction(sender, UnavailableReason([StartButton])); return; }
         try
         {
             if (session.State == SessionState.Suspended)
             {
-                if (session.Options.DeviceFeedback && !device.IsArmed) { Notice("本次会话使用真实输出，请先在设备页重新授权。"); ShowPage("DevicePage"); return; }
+                if (session.Options.DeviceFeedback && !device.IsArmed) { ShowPage("DevicePage"); ExplainUnavailableAction(DeviceConnectButton, "本次会话使用真实输出，请先在设备页重新授权。"); return; }
                 session.Resume(DateTimeOffset.Now);
             }
             else if (session.State == SessionState.Resting) session.EndBreak(DateTimeOffset.Now);
             else if (!session.IsActive)
             {
-                if (SelectedPlan == null) { Notice("请先创建并选择一个专注方案。"); ShowPage("PlansPage"); PlanPicker.Focus(); return; }
+                if (SelectedPlan == null) { ShowPage("PlansPage"); PlanPicker.Focus(); ExplainUnavailableAction(PlanPicker, "请先创建并选择一个专注方案。"); return; }
                 CommitSelectedPlan();
-                if (SelectedPlan!.Options.DeviceFeedback && !device.IsArmed) { Notice("此方案启用了真实输出，请先连接设备并授权本次上限。"); Save(); ShowPage("DevicePage"); return; }
+                if (SelectedPlan!.Options.DeviceFeedback && !device.IsArmed) { Save(); ShowPage("DevicePage"); ExplainUnavailableAction(DeviceConnectButton, "此方案启用了真实输出，请先连接设备并授权本次上限。"); return; }
                 session.Start(SelectedPlan, DateTimeOffset.Now);
                 FeedbackLabel.Text = session.Options.DeviceFeedback ? "设备反馈待命 · 本次已授权" : "模拟反馈待命 · 无设备输出";
                 FloatClick(sender, e);
@@ -344,19 +349,19 @@ public partial class MainWindow : Window
             lastTick = elapsed.Elapsed;
             ShowPage("FocusPage"); Save(); Refresh();
         }
-        catch (ArgumentException ex) { Notice(ex.Message); ShowPage("PlansPage"); }
+        catch (ArgumentException ex) { ShowPage("PlansPage"); ExplainUnavailableAction(SavePlanButton, ex.Message); }
     }
     private void PresetClick(object sender, RoutedEventArgs e)
     {
-        if (session.IsActive || SelectedPlan == null) { Notice("请先选择方案，会话进行中不能修改时长。"); return; }
+        if (session.IsActive || SelectedPlan == null) { ExplainUnavailableAction(sender, PlanEditReason); return; }
         FocusMinutesBox.Text = (string)((Button)sender).Tag;
         SaveSettingsClick(sender, e);
     }
     private void SaveSettingsClick(object sender, RoutedEventArgs e)
     {
-        if (session.IsActive) { Notice("请在会话结束后修改设置。"); return; }
+        if (session.IsActive) { ExplainUnavailableAction(sender, PlanEditReason); return; }
         try { CommitSelectedPlan(); Save(); Refresh(); Notice("方案已保存：" + SelectedPlan!.Name); }
-        catch (ArgumentException ex) { Notice(ex.Message); }
+        catch (ArgumentException ex) { ExplainUnavailableAction(sender, ex.Message); }
     }
     private void PreferencesClick(object sender, RoutedEventArgs e)
     {
@@ -390,17 +395,27 @@ public partial class MainWindow : Window
     }
     private void ExitClick(object sender, RoutedEventArgs e)
     {
-        if (session.IsHardModeLocked) { Notice("狠心模式将在约定时长结束后退出。立即停电始终可用。"); return; }
+        if (session.IsHardModeLocked || session.State is not (SessionState.Focusing or SessionState.Resting))
+        { ExplainUnavailableAction(sender, UnavailableReason([ExitButton])); return; }
         session.RequestExit(DateTimeOffset.Now); Save(); ShowPage("FocusPage"); Refresh();
     }
-    private void CancelExitClick(object sender, RoutedEventArgs e) { session.CancelExit(DateTimeOffset.Now); Save(); Refresh(); }
+    private void CancelExitClick(object sender, RoutedEventArgs e)
+    {
+        if (session.State != SessionState.ExitPending) { ExplainUnavailableAction(sender, "当前没有等待退出的申请，无需取消。"); return; }
+        session.CancelExit(DateTimeOffset.Now); Save(); Refresh();
+    }
     private void CheckInClick(object sender, RoutedEventArgs e) { session.CheckIn(DateTimeOffset.Now); Save(); Refresh(); }
     private void BreakClick(object sender, RoutedEventArgs e)
     {
-        if (session.IsHardModeLocked) { Notice("狠心模式不允许提前休息。立即停电始终可用。"); return; }
+        if (session.IsHardModeLocked || session.State != SessionState.Focusing)
+        { ExplainUnavailableAction(sender, session.IsHardModeLocked ? UnavailableReason([BreakButton]) : "当前不在专注中。请先开始或继续专注，再申请休息。"); return; }
         session.TakeBreak(DateTimeOffset.Now); Save(); ShowPage("FocusPage"); Refresh();
     }
-    private void EmergencyClick(object sender, RoutedEventArgs e) => SuspendForFault("会话已暂停，已停止续发并撤销设备授权。继续时保留本次规则。");
+    private void EmergencyClick(object sender, RoutedEventArgs e)
+    {
+        unavailableActions.Close(); floating?.UnavailableActions.Close();
+        SuspendForFault("会话已暂停，已停止续发并撤销设备授权。继续时保留本次规则。");
+    }
     public void SuspendForFault(string reason)
     {
         if (!session.IsActive || session.State == SessionState.Suspended) _ = device.StopAsync();
@@ -409,12 +424,14 @@ public partial class MainWindow : Window
     }
     private void TemporaryClick(object sender, RoutedEventArgs e)
     {
-        if (session.AddTemporaryDomain(TemporaryInput.Text, DateTimeOffset.Now, out var message)) TemporaryInput.Clear();
-        Notice(message); Save(); Refresh();
+        var added = session.AddTemporaryDomain(TemporaryInput.Text, DateTimeOffset.Now, out var message);
+        if (added) TemporaryInput.Clear();
+        Save(); Refresh();
+        if (added) Notice(message); else ExplainUnavailableAction(sender, message);
     }
     private void AddAppClick(object sender, RoutedEventArgs e)
     {
-        if (session.IsActive || SelectedPlan == null) return;
+        if (session.IsActive || SelectedPlan == null) { ExplainUnavailableAction(sender, PlanEditReason); return; }
         CancelAppSelection();
         var picker = new OpenFileDialog { Filter = "Windows 程序 (*.exe)|*.exe", Title = AppActionBox.SelectedIndex == 1 ? "选择加入黑名单的软件" : "选择加入白名单的软件" };
         if (picker.ShowDialog(this) == true && Rules.TryCreate(RuleKind.Application, picker.FileName, false, out var rule))
@@ -422,10 +439,10 @@ public partial class MainWindow : Window
     }
     private void AddWebClick(object sender, RoutedEventArgs e)
     {
-        if (session.IsActive || SelectedPlan == null) return;
+        if (session.IsActive || SelectedPlan == null) { ExplainUnavailableAction(sender, PlanEditReason); return; }
         var kind = RuleKindBox.SelectedIndex switch { 1 => RuleKind.Page, 2 => RuleKind.PathPrefix, _ => RuleKind.Domain };
         if (Rules.TryCreate(kind, RuleInput.Text, SubdomainsBox.IsChecked == true, out var rule)) { AddRule(rule! with { Action = WebActionBox.SelectedIndex == 1 ? RuleAction.Block : RuleAction.Allow }); RuleInput.Clear(); }
-        else Notice("域名请输入 example.com，页面或路径规则请输入以 https:// 开头的完整地址。");
+        else ExplainUnavailableAction(sender, "域名请输入 example.com，页面或路径规则请输入以 https:// 开头的完整地址。");
     }
     private void AddRule(AllowRule rule)
     {
@@ -436,7 +453,7 @@ public partial class MainWindow : Window
     }
     private void RemoveRuleClick(object sender, RoutedEventArgs e)
     {
-        if (session.IsActive || SelectedPlan == null) { Notice("请在会话结束后编辑方案规则。"); return; }
+        if (session.IsActive || SelectedPlan == null) { ExplainUnavailableAction(sender, PlanEditReason); return; }
         rules.Remove((AllowRule)((Button)sender).Tag); Save(); Refresh();
     }
     private void FloatClick(object sender, RoutedEventArgs e)
@@ -538,11 +555,11 @@ public partial class MainWindow : Window
     }
     private async void DeviceConnectClick(object sender, RoutedEventArgs e)
     {
-        if (connectingDevice) return;
+        if (connectingDevice) { ExplainUnavailableAction(sender, "正在建立连接，请等待完成后再操作。"); return; }
         if (session.IsActive && session.Options.DeviceFeedback) SuspendForFault("重新配对设备，专注会话已暂停。");
         var local = ConnectionModeBox.SelectedIndex == 0;
         var network = LanAddressBox.SelectedItem as LanAddress;
-        if (local && network == null) { Notice("未找到局域网 IPv4 地址，请联网后刷新网卡，或选择官方公网中继。"); return; }
+        if (local && network == null) { ExplainUnavailableAction(sender, "未找到局域网 IPv4 地址，请联网后刷新网卡，或选择官方公网中继。"); return; }
         connectingDevice = true; ClearPairing(); RefreshConnectionControls();
         try
         {
@@ -561,13 +578,14 @@ public partial class MainWindow : Window
         {
             await StopLocalRelay();
             DeviceStatusLabel.Text = "局域网服务启动失败：地址已变化或端口 17841 被占用。请刷新网卡后重试。";
+            ExplainUnavailableAction(sender, DeviceStatusLabel.Text);
         }
         finally { connectingDevice = false; RefreshConnectionControls(); }
     }
     private async void DeviceDisconnectClick(object sender, RoutedEventArgs e)
     {
         if (session.IsActive && session.Options.DeviceFeedback) SuspendForFault("设备已断开，专注会话暂停。");
-        if (connectingDevice) return;
+        if (connectingDevice) { ExplainUnavailableAction(sender, "正在建立连接，请等待完成后再操作。"); return; }
         connectingDevice = true; RefreshConnectionControls();
         try { await device.DisconnectAsync(); await StopLocalRelay(); ClearPairing(); }
         finally { connectingDevice = false; RefreshConnectionControls(); }
@@ -577,19 +595,19 @@ public partial class MainWindow : Window
     {
         if (closing) return;
         if (session.IsHardModeLocked)
-        { e.Cancel = true; Notice("狠心模式尚未完成，不能提前关闭。立即停电始终可用。"); return; }
+        { e.Cancel = true; ExplainUnavailableAction(ExitButton, "狠心模式尚未完成，不能提前关闭。立即停电始终可用。"); return; }
         if (session.IsActive && session.State != SessionState.Suspended)
         {
             e.Cancel = true;
             if (session.State != SessionState.ExitPending) ExitClick(this, new RoutedEventArgs());
-            Notice("专注会话将在倒计时结束后退出。悬浮球可取消退出，立即暂停始终可用。");
+            ExplainUnavailableAction(StartButton, "专注会话将在退出倒计时结束后关闭。可取消退出继续复习，立即停电始终可用。");
             return;
         }
         e.Cancel = true; Quit();
     }
     private void CloseSoftware()
     {
-        if (session.IsHardModeLocked) { ShowMain(); Notice("狠心模式将在约定时长结束后退出。立即停电始终可用。"); return; }
+        if (session.IsHardModeLocked) { ShowMain(); ExplainUnavailableAction(ExitButton, "狠心模式将在约定时长结束后退出。立即停电始终可用。"); return; }
         SuspendForFault("软件已关闭，继续时需确认上次会话。"); Quit();
     }
     private void HardModeChanged(object sender, RoutedEventArgs e) => RefreshHardModeEditor();
@@ -619,6 +637,7 @@ public partial class MainWindow : Window
         try
         {
             await RunTutorialSmoke(folder);
+            await CheckInitialUnavailableActions(folder);
             if (StartButton.IsEnabled) throw new InvalidOperationException("未选方案时启动按钮应禁用。");
             StartClick(this, new RoutedEventArgs());
             if (session.IsActive || page != "PlansPage") throw new InvalidOperationException("菜单绕过了必选方案限制。");
@@ -677,6 +696,7 @@ public partial class MainWindow : Window
             DeviceFeedbackBox.IsChecked = true; SaveSettingsClick(this, new RoutedEventArgs());
             StartClick(this, new RoutedEventArgs());
             if (session.IsActive || page != "DevicePage") throw new InvalidOperationException("未授权设备的真实方案仍可启动。");
+            await CheckUnavailableAction(ArmDeviceButton, "尚未连接", folder, "UnavailableDeviceDisconnected");
             PageScroll.ScrollToTop();
             await Dispatcher.InvokeAsync(() => { UpdateLayout(); Capture(folder, "DeviceSetup"); }, DispatcherPriority.ApplicationIdle);
             DeviceFeedbackBox.IsChecked = false; SaveSettingsClick(this, new RoutedEventArgs());
@@ -684,6 +704,9 @@ public partial class MainWindow : Window
             if (session.PlanId != firstId || session.PlanName != "网课复习") throw new InvalidOperationException("启动没有绑定选择的方案。");
             CaptureNextWindowClick(this, new RoutedEventArgs()); ChooseRunningAppClick(this, new RoutedEventArgs());
             if (appSelectionPlan != null || AppRuleEditor.IsEnabled) throw new InvalidOperationException("专注会话中仍能选择软件或修改名单。");
+            ShowPage("PlansPage"); ShowPlanTab("RulesEditor");
+            await CheckUnavailableAction(ChooseRunningAppButton, "锁定", folder, "UnavailableLockedParent");
+            ShowPage("FocusPage");
             PlanPicker.SelectedValue = secondId;
             if (selectedPlanId != firstId || session.PlanId != firstId || PlanPicker.SelectedValue as Guid? != firstId)
                 throw new InvalidOperationException("会话中可以切换方案。");
@@ -832,6 +855,7 @@ public partial class MainWindow : Window
             File.AppendAllText(Path.Combine(folder, "smoke-result.txt"), File.ReadAllText(Path.Combine(folder, "app-selection-result.txt")));
             File.AppendAllText(Path.Combine(folder, "smoke-result.txt"), File.ReadAllText(Path.Combine(folder, "hard-mode-result.txt")));
             File.AppendAllText(Path.Combine(folder, "smoke-result.txt"), File.ReadAllText(Path.Combine(folder, "tutorial-result.txt")));
+            File.AppendAllText(Path.Combine(folder, "smoke-result.txt"), File.ReadAllText(Path.Combine(folder, "unavailable-actions-result.txt")));
             if (Array.IndexOf(args, "--device-test-relay") >= 0)
                 File.AppendAllText(Path.Combine(folder, "smoke-result.txt"), "PASS: local fake App only: UI authorization → selected plan → 10-second activation with zero debt → accumulated-time ramp → bounded V4 requests → emergency stop. Live requested intensity in main header, collapsed ball and expanded panel follows controller changes and clears on stop. Allowed-content idle 5+10 seconds emits bounded output; new input clears it. No physical device connected.\n");
         }
@@ -840,12 +864,12 @@ public partial class MainWindow : Window
     }
     private void Capture(string folder, string name)
     {
-        var bitmap = new RenderTargetBitmap((int)Math.Ceiling(RootGrid.ActualWidth), (int)Math.Ceiling(RootGrid.ActualHeight), 96, 96, PixelFormats.Pbgra32);
+        var view = RootGrid.TransformToAncestor((Visual)RootGrid.Parent).TransformBounds(new Rect(0, 0, RootGrid.ActualWidth, RootGrid.ActualHeight));
+        var bitmap = new RenderTargetBitmap((int)Math.Ceiling(view.Width), (int)Math.Ceiling(view.Height), 96, 96, PixelFormats.Pbgra32);
         var visual = new DrawingVisual();
-        var bounds = new Rect(0, 0, RootGrid.ActualWidth, RootGrid.ActualHeight);
-        var offset = VisualTreeHelper.GetOffset(RootGrid);
+        var bounds = new Rect(view.Size);
         using (var dc = visual.RenderOpen()) dc.DrawRectangle(new VisualBrush(RootGrid)
-        { ViewboxUnits = BrushMappingMode.Absolute, Viewbox = new Rect(offset.X, offset.Y, bounds.Width, bounds.Height), Stretch = Stretch.Fill }, null, bounds);
+        { ViewboxUnits = BrushMappingMode.Absolute, Viewbox = view, Stretch = Stretch.Fill }, null, bounds);
         bitmap.Render(visual); var encoder = new PngBitmapEncoder(); encoder.Frames.Add(BitmapFrame.Create(bitmap));
         using var file = File.Create(Path.Combine(folder, name + ".png")); encoder.Save(file);
     }

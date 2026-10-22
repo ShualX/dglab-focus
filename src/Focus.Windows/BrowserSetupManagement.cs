@@ -13,7 +13,7 @@ public partial class MainWindow
 
     private async void ConfigureBrowserClick(object sender, RoutedEventArgs e)
     {
-        if (preparingBrowser || storage.LoadError != null) return;
+        if (preparingBrowser || storage.LoadError != null) { ExplainUnavailableAction(sender, UnavailableReason([ConfigureChromeButton])); return; }
         preparingBrowser = true; RefreshBrowserSetup();
         var browser = (string)((Button)sender).Tag;
         try
@@ -35,7 +35,7 @@ public partial class MainWindow
             await Dispatcher.InvokeAsync(() => { UpdateLayout(); BrowserSetupPanel.BringIntoView(); }, System.Windows.Threading.DispatcherPriority.Loaded);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or InvalidOperationException or System.Text.Json.JsonException)
-        { Notice("扩展准备失败：" + ex.Message); }
+        { ExplainUnavailableAction(sender, "扩展准备失败：" + ex.Message); }
         finally { preparingBrowser = false; RefreshBrowserSetup(); }
     }
     private void ShowPreparedBrowserSetup(string browser, string directory)
@@ -63,7 +63,7 @@ public partial class MainWindow
     }
     private void CopyPreparedExtensionPathClick(object sender, RoutedEventArgs e)
     {
-        if (PreparedExtensionPathBox.Text.Length == 0) return;
+        if (PreparedExtensionPathBox.Text.Length == 0) { ExplainUnavailableAction(sender, "尚未准备浏览器扩展。请先点击「一键配置 Chrome」或「一键配置 Edge」。"); return; }
         try { Clipboard.SetText(PreparedExtensionPathBox.Text); Notice("安装目录已复制，在浏览器选择扩展文件夹时粘贴即可。"); }
         catch (COMException) { Notice("剪贴板被占用，请稍后重试或直接复制上方路径。"); }
     }

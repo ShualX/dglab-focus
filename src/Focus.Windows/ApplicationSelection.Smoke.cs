@@ -35,7 +35,9 @@ public partial class MainWindow
             new RunningApplication("StudyReader", @"C:\Program Files\StudyReader\StudyReader.exe", "学习资料 · 第二章", 1),
             new RunningApplication("Visual Studio Code", @"C:\Program Files\Microsoft VS Code\Code.exe", "复习笔记", 1)
         };
-        FilterRunningApps(); RunningAppList.SelectedIndex = 1;
+        FilterRunningApps(); RunningAppList.SelectedIndex = -1; RefreshApplicationSelectionControls();
+        await CheckUnavailableAction(ConfirmAppSelectionButton, "还没有选中", folder, "UnavailableSoftwareSelection");
+        RunningAppList.SelectedIndex = 1;
         await Dispatcher.InvokeAsync(() => { UpdateLayout(); AppSelectionPanel.BringIntoView(); }, DispatcherPriority.ApplicationIdle);
         await Dispatcher.InvokeAsync(() => { UpdateLayout(); Capture(folder, "AppSelectionRunning"); }, DispatcherPriority.ApplicationIdle);
         RunningAppSearch.Text = "课程";
