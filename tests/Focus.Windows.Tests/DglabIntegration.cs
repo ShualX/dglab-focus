@@ -163,7 +163,9 @@ internal static class DglabIntegration
             });
             try
             {
-                await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(25));
+                // First-run WPF startup and the full tutorial/compact screenshot set are slower on hosted runners.
+                // This only bounds the test host; device leases and output watchdog timing remain unchanged.
+                await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(90));
                 var result = File.ReadAllText(Path.Combine(folder, "smoke-result.txt"));
                 assert(process.ExitCode == 0 && result.Contains("UI authorization"), "Windows UI connects a local fake App, arms, starts its plan, emits bounded requests and stops immediately: " + (process.ExitCode == 0 ? "PASS" : result));
                 assert(result.Contains("native window activation"), "Windows UI enumerates two fixture windows, merges them, captures a real WinEvent notification and applies its executable rule");
