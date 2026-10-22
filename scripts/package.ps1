@@ -1,8 +1,10 @@
-param([string]$RuntimeVersion = '8.0.32', [switch]$SkipPublish)
+param([string]$RuntimeVersion = '8.0.32', [switch]$SkipPublish, [string]$OutputDirectory = '')
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $PSScriptRoot
-$publishRoot = Join-Path $projectRoot 'dist\win-x64'
-$bundleRoot = Join-Path $projectRoot 'dist\dglab-focus-windows-x64'
+if ([string]::IsNullOrWhiteSpace($OutputDirectory)) { $OutputDirectory = Join-Path $projectRoot 'dist' }
+$OutputDirectory = [IO.Path]::GetFullPath($OutputDirectory)
+$publishRoot = Join-Path $OutputDirectory 'win-x64'
+$bundleRoot = Join-Path $OutputDirectory 'dglab-focus-windows-x64'
 if (!$SkipPublish) {
   dotnet publish (Join-Path $projectRoot 'src\Focus.Windows\Focus.Windows.csproj') -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true -p:RuntimeFrameworkVersion=$RuntimeVersion -p:DebugType=None -o $publishRoot --nologo
   if ($LASTEXITCODE -ne 0) { throw 'dotnet publish failed' }
@@ -16,7 +18,7 @@ Copy-Item -LiteralPath (Join-Path $projectRoot 'docs') -Destination $bundleRoot 
 $installerFolder = Join-Path $bundleRoot 'setup'
 New-Item -ItemType Directory -Path $installerFolder -Force | Out-Null
 foreach ($name in @('install.ps1','uninstall.ps1','Install.cmd','Uninstall.cmd')) { Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) -Destination $installerFolder -Force }
-$archive = Join-Path $projectRoot 'dist\dglab-focus-windows-x64.zip'
+$archive = Join-Path $OutputDirectory 'dglab-focus-windows-x64.zip'
 Compress-Archive -Path (Join-Path $bundleRoot '*') -DestinationPath $archive -Force
-Get-FileHash -LiteralPath $archive -Algorithm SHA256 | ForEach-Object { ($_.Hash.ToLowerInvariant() + '  dglab-focus-windows-x64.zip') | Set-Content -LiteralPath (Join-Path $projectRoot 'dist\SHA256SUMS.txt') -Encoding ascii }
+Get-FileHash -LiteralPath $archive -Algorithm SHA256 | ForEach-Object { ($_.Hash.ToLowerInvariant() + '  dglab-focus-windows-x64.zip') | Set-Content -LiteralPath (Join-Path $OutputDirectory 'SHA256SUMS.txt') -Encoding ascii }
 Write-Output $archive

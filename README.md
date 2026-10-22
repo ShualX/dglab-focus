@@ -126,6 +126,8 @@ node --test tests/extension.test.js
 powershell -ExecutionPolicy Bypass -File scripts/package.ps1
 ```
 
+旧版程序正在运行时，可给打包脚本传入 `-OutputDirectory D:\temp\dglab-focus-0.4.2`，将新版放到独立目录，避免写入被占用的文件。
+
 运行界面渲染检查，不读取或写入个人设置、不连接设备：
 
 ```powershell
