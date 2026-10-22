@@ -40,7 +40,7 @@
             <Button Content="⌃" Click="CollapseClick" MinHeight="32" Padding="8,5" Margin="5,0,0,0" AutomationProperties.Name="收起悬浮球"/>
           </StackPanel>
         </Grid>
-        <ProgressBar x:Name="Progress" Grid.Row="1" Height="3" Foreground="{DynamicResource Accent}" Background="{DynamicResource Raised}" BorderThickness="0" Margin="0,12,0,10"/>
+        <ProgressBar x:Name="Progress" Grid.Row="1" Height="3" Foreground="{DynamicResource Accent}" Background="{DynamicResource Raised}" BorderThickness="0" Margin="0,12,0,10" AutomationProperties.Name="当前曲线强度"/>
         <DockPanel Grid.Row="2">
           <Button x:Name="CheckInButton" Content="我在学习" DockPanel.Dock="Right" Click="CheckInClick" Visibility="Collapsed" Padding="8,5" MinHeight="32"/>
           <TextBlock x:Name="MessageLabel" Text="每次会话可临时放行 1 个域名" Style="{StaticResource Caption}" FontSize="11" MaxHeight="40" TextTrimming="CharacterEllipsis"/>

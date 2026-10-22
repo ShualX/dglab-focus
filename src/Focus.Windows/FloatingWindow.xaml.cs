@@ -16,11 +16,12 @@ public partial class FloatingWindow : Window
         var area = SystemParameters.WorkArea;
         Left = area.Right - Width - 24; Top = area.Bottom - Height - 24;
     }
-    public void Update(string label, string time, SessionState value, bool needsCheckIn, double debt, double threshold)
+    public void Update(string label, string time, SessionState value, bool needsCheckIn, double strength, double maximum)
     {
         state = value;
         StateLabel.Text = label; TimeLabel.Text = BallTimeLabel.Text = time;
-        Progress.Maximum = threshold; Progress.Value = Math.Min(debt, threshold);
+        Progress.Maximum = Math.Max(1, maximum); Progress.Value = Math.Min(strength, Progress.Maximum);
+        Progress.ToolTip = $"当前曲线 {strength:0.#}% / 上限 {maximum:0.#}%";
         ExitButton.Content = value == SessionState.ExitPending ? "取消退出" : "申请退出";
         ExitButton.IsEnabled = value is SessionState.Focusing or SessionState.Resting or SessionState.ExitPending;
         CheckInButton.Visibility = needsCheckIn ? Visibility.Visible : Visibility.Collapsed;

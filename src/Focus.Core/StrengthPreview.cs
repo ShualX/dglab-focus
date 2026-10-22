@@ -16,11 +16,10 @@ public sealed record StrengthPreviewOptions
             || IntervalSeconds < 1 || IntervalSeconds > 3600 || !double.IsFinite(IncidentIncrement) || IncidentIncrement < 0 || IncidentIncrement > 100)
             throw new ArgumentException("曲线需满足 0 ≤ 起始值 ≤ 上限 ≤ 100，递增量为 0–100 之间的正数，间隔为 1–3600 秒，重复分心附加值为 0–100。");
     }
-    public double At(double cumulativeSeconds, double thresholdSeconds, int recentIncidents = 1)
+    public double At(double cumulativeSeconds, int recentIncidents = 1)
     {
-        if (!Enabled || !double.IsFinite(cumulativeSeconds) || !double.IsFinite(thresholdSeconds)
-            || thresholdSeconds < 0 || cumulativeSeconds < thresholdSeconds) return 0;
-        var steps = Math.Floor((cumulativeSeconds - thresholdSeconds) / IntervalSeconds);
+        if (!Enabled || !double.IsFinite(cumulativeSeconds) || cumulativeSeconds < 0) return 0;
+        var steps = Math.Floor(cumulativeSeconds / IntervalSeconds);
         return Math.Min(Maximum, Initial + steps * Increment + Math.Max(0, recentIncidents - 1) * IncidentIncrement);
     }
 }

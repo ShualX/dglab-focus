@@ -34,7 +34,7 @@ public sealed class StrengthChart : FrameworkElement
             Point previous = default;
             for (int i = 0; i <= 5; i++)
             {
-                var level = profile.At(i * profile.IntervalSeconds, 0);
+                var level = profile.At(i * profile.IntervalSeconds);
                 var point = new Point(34 + width * i / 5, 2 + height * (1 - level / maximum));
                 if (i == 0) g.BeginFigure(point, false, false);
                 else
@@ -43,7 +43,7 @@ public sealed class StrengthChart : FrameworkElement
                     g.LineTo(point, true, false);
                 }
                 previous = point;
-                if (i is 0 or 2 or 5) Text($"+{i * profile.IntervalSeconds:0.#} 秒", new(point.X - 14, height + 10));
+                if (i is 0 or 2 or 5) Text($"{i * profile.IntervalSeconds:0.#} 秒", new(point.X - 14, height + 10));
             }
         }
         dc.DrawGeometry(null, new Pen(accent, 2.5), geometry);

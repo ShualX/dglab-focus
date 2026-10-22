@@ -37,7 +37,7 @@
             <TextBlock Text="STUDY ROOM" Style="{StaticResource Caption}" FontFamily="Bahnschrift" FontSize="11"/>
           </StackPanel>
           <StackPanel DockPanel.Dock="Bottom" Margin="12,12,0,0">
-            <TextBlock Text="WINDOWS · v0.4.3" Style="{StaticResource Caption}" FontFamily="Bahnschrift"/>
+            <TextBlock Text="WINDOWS · v0.4.4" Style="{StaticResource Caption}" FontFamily="Bahnschrift"/>
             <TextBlock Text="独立开源项目 / DG-LAB 4" Style="{StaticResource Caption}" FontSize="11" Margin="0,6,0,0"/>
           </StackPanel>
           <StackPanel>
@@ -136,8 +136,8 @@
                         <TextBlock Text="累计分心"/>
                         <TextBlock x:Name="DebtLabel" Text="0 秒" HorizontalAlignment="Right" FontWeight="SemiBold"/>
                       </Grid>
-                      <ProgressBar x:Name="DebtBar" Height="4" Margin="0,14,0,10" Foreground="{DynamicResource Accent}" Background="{DynamicResource Raised}" BorderThickness="0" Maximum="60"/>
-                      <TextBlock x:Name="ThresholdLabel" Text="提醒线 60 秒 / 持续专注后逐渐消除" Style="{StaticResource Caption}" FontSize="12"/>
+                      <ProgressBar x:Name="DebtBar" Height="4" Margin="0,14,0,10" Foreground="{DynamicResource Accent}" Background="{DynamicResource Raised}" BorderThickness="0" Maximum="30" ToolTip="累计分心到下一次强度递增的进度；达到曲线上限时保持满格" AutomationProperties.Name="下一次累计强度递增的进度"/>
+                      <TextBlock x:Name="ThresholdLabel" Text="连续分心满 10 秒启动 · 再累计 30 秒递增" Style="{StaticResource Caption}" FontSize="12"/>
                       <Border Height="1" Background="{DynamicResource Line}" Margin="0,18"/>
                       <Grid>
                         <TextBlock Text="最近一小时" Style="{StaticResource Caption}"/>
@@ -350,7 +350,7 @@
               <Border Style="{StaticResource Card}" Margin="0,0,0,16">
                 <StackPanel>
                   <TextBlock Text="强度曲线" Style="{StaticResource SectionTitle}"/>
-                  <TextBlock Text="达到分心提醒线后递增，最近一小时多次分心可附加递增，最终不超过曲线上限。真实输出 = 本次手动设备上限 × 曲线百分比，向下取整。" Style="{StaticResource Caption}" Margin="0,0,0,12"/>
+                  <TextBlock Text="连续分心满启动延迟就按当前曲线反馈。累计分心每满一个递增间隔提高强度，一小时内多次分心另加附加值，最终不超过曲线上限。真实输出 = 本次手动设备上限 × 曲线百分比，向下取整。" Style="{StaticResource Caption}" Margin="0,0,0,12"/>
                   <StackPanel x:Name="StrengthSettingsEditor">
                     <CheckBox x:Name="StrengthEnabledBox" Content="启用强度曲线与预览" Click="StrengthInputChanged"/>
                     <CheckBox x:Name="DeviceFeedbackBox" Content="此方案使用真实设备反馈（每次需手动授权设备上限）" Margin="0,8,0,0"/>
@@ -377,7 +377,7 @@
                       <TextBox x:Name="IncidentBoostBox" Text="5" Margin="0,7,0,0" TextChanged="StrengthTextChanged" AutomationProperties.Name="重复分心附加强度百分比"/>
                     </StackPanel>
                     <TextBlock x:Name="StrengthValidationLabel" Style="{StaticResource Caption}" Margin="0,12,0,0"/>
-                    <local:StrengthChart x:Name="RampChart" Height="132" Margin="0,12,0,0" AutomationProperties.Name="达到提醒线后前五次递增的模拟强度曲线"/>
+                    <local:StrengthChart x:Name="RampChart" Height="132" Margin="0,12,0,0" AutomationProperties.Name="以累计分心秒数为横轴的强度曲线，从起始值展示前五次递增"/>
                   </StackPanel>
                 </StackPanel>
               </Border>
@@ -413,20 +413,17 @@
                       </StackPanel>
                     </UniformGrid>
                     <CheckBox x:Name="RepeatBox" Content="休息结束后开始下一轮专注（仍属同一会话）" Margin="0,12,0,0"/>
-                    <UniformGrid Columns="3" Margin="0,16,0,0">
+                    <UniformGrid Columns="2" Margin="0,16,0,0">
                       <StackPanel Margin="0,0,14,0">
-                        <TextBlock Text="切换宽限（秒）" Style="{StaticResource Caption}"/>
-                        <TextBox x:Name="GraceBox" Text="10" Margin="0,7,0,0" AutomationProperties.Name="切换宽限秒"/>
-                      </StackPanel>
-                      <StackPanel Margin="0,0,14,0">
-                        <TextBlock Text="累计提醒线（秒）" Style="{StaticResource Caption}"/>
-                        <TextBox x:Name="ThresholdBox" Text="60" Margin="0,7,0,0" AutomationProperties.Name="累计分心提醒秒"/>
+                        <TextBlock Text="分心启动延迟（秒）" Style="{StaticResource Caption}"/>
+                        <TextBox x:Name="GraceBox" Text="10" Margin="0,7,0,0" AutomationProperties.Name="连续分心多少秒后启动反馈，1 到 300 秒"/>
                       </StackPanel>
                       <StackPanel>
                         <TextBlock Text="无操作确认（秒）" Style="{StaticResource Caption}"/>
                         <TextBox x:Name="IdleBox" Text="180" Margin="0,7,0,0" AutomationProperties.Name="空闲确认秒"/>
                       </StackPanel>
                     </UniformGrid>
+                    <TextBlock Text="连续分心满设定秒数就启动反馈（1–300 秒，默认 10 秒）。等待期间不计入累计；累计分心只用于提高强度。" Style="{StaticResource Caption}" Margin="0,10,0,0"/>
                     <UniformGrid Columns="2" Margin="0,16,0,0">
                       <StackPanel Margin="0,0,14,0">
                         <TextBlock Text="连续专注多久后恢复（秒）" Style="{StaticResource Caption}"/>
@@ -448,7 +445,7 @@
               <Border Style="{StaticResource Card}">
                 <StackPanel>
                   <TextBlock Text="反馈与显示" Style="{StaticResource SectionTitle}"/>
-                  <CheckBox x:Name="SoundBox" Content="分心达到提醒线时播放提示音（默认关闭）" Click="PreferencesClick"/>
+                  <CheckBox x:Name="SoundBox" Content="连续分心达到启动时间时播放提示音（默认关闭）" Click="PreferencesClick"/>
                   <CheckBox x:Name="ReducedMotionBox" Content="减少动态效果" Click="PreferencesClick"/>
                   <TextBlock Text="提醒始终包含文字。系统关闭动画或启用高对比度时，软件会相应调整。" Style="{StaticResource Caption}" Margin="0,10,0,0"/>
                   <Button Content="开始一次休息" Click="BreakClick" HorizontalAlignment="Left" Margin="0,16,0,0"/>

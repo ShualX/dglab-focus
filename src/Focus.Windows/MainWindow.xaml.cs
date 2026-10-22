@@ -132,7 +132,7 @@ public partial class MainWindow : Window
         string N(double v) => v.ToString(CultureInfo.InvariantCulture);
         FocusMinutesBox.Text = N(o.FocusMinutes); RestMinutesBox.Text = N(o.RestMinutes);
         ModeBox.SelectedIndex = (int)o.Mode; RepeatBox.IsChecked = o.Repeat;
-        GraceBox.Text = N(o.GraceSeconds); ThresholdBox.Text = N(o.AlertThresholdSeconds);
+        GraceBox.Text = N(o.GraceSeconds);
         IdleBox.Text = N(o.IdleSeconds); CheckInMinutesBox.Text = N(o.CheckInMinutes);
         RecoveryDelayBox.Text = N(o.RecoveryDelaySeconds); RecoveryRateBox.Text = N(o.RecoveryRate);
         AppPolicyBox.SelectedIndex = AppActionBox.SelectedIndex = (int)o.ApplicationMode;
@@ -161,7 +161,7 @@ public partial class MainWindow : Window
         var o = new SessionOptions
         {
             FocusMinutes = Number(FocusMinutesBox), RestMinutes = Number(RestMinutesBox), Mode = (StudyMode)ModeBox.SelectedIndex,
-            Repeat = RepeatBox.IsChecked == true, GraceSeconds = Number(GraceBox), AlertThresholdSeconds = Number(ThresholdBox),
+            Repeat = RepeatBox.IsChecked == true, GraceSeconds = Number(GraceBox),
             IdleSeconds = Number(IdleBox), CheckInMinutes = Number(CheckInMinutesBox), RecoveryDelaySeconds = Number(RecoveryDelayBox), RecoveryRate = Number(RecoveryRateBox),
             ApplicationMode = (RuleMode)AppPolicyBox.SelectedIndex, WebsiteMode = (RuleMode)WebPolicyBox.SelectedIndex,
             StrengthPreview = ReadStrength(), DeviceFeedback = DeviceFeedbackBox.IsChecked == true, IdlePolicy = (IdlePolicy)IdlePolicyBox.SelectedIndex
@@ -236,8 +236,12 @@ public partial class MainWindow : Window
         System.Windows.Automation.AutomationProperties.SetName(Dial, stateText + " " + Clock(seconds));
         ModeLabel.Text = o.Mode switch { StudyMode.Reading => "阅读 / 网课", StudyMode.Paper => "纸笔复习", _ => "电脑复习" };
         DebtLabel.Text = $"{Math.Floor(session.DebtSeconds)} 秒";
-        DebtBar.Maximum = o.AlertThresholdSeconds; DebtBar.Value = Math.Min(o.AlertThresholdSeconds, session.DebtSeconds);
-        ThresholdLabel.Text = $"提醒线 {o.AlertThresholdSeconds:0} 秒 / 持续专注后逐渐消除";
+        var curve = o.StrengthPreview;
+        var atCeiling = curve.Enabled && curve.At(session.DebtSeconds, session.RecentCount(DateTimeOffset.Now)) >= curve.Maximum;
+        DebtBar.Maximum = curve.IntervalSeconds;
+        DebtBar.Value = !curve.Enabled ? 0 : atCeiling ? curve.IntervalSeconds : session.DebtSeconds % curve.IntervalSeconds;
+        ThresholdLabel.Text = $"连续分心满 {o.GraceSeconds:0.##} 秒启动 · " + (!curve.Enabled ? "曲线已关闭"
+            : atCeiling ? "已达曲线上限" : $"再累计 {Math.Ceiling(curve.IntervalSeconds - DebtBar.Value)} 秒递增");
         IncidentLabel.Text = $"{session.RecentCount(DateTimeOffset.Now)} 次分心";
         ReasonLabel.Text = session.StatusReason;
         StrengthValueLabel.Text = $"{session.PreviewStrength:0.#}% / {o.StrengthPreview.Maximum:0.#}%";
@@ -262,7 +266,7 @@ public partial class MainWindow : Window
         RefreshBrowserSetup();
         var summary = $"白名单 {rules.Count(x => x.Action == RuleAction.Allow)} 条 · 黑名单 {rules.Count(x => x.Action == RuleAction.Block)} 条。";
         RuleLockLabel.Text = summary + (session.IsActive ? "本次会话规则与模式已锁定。" : "黑名单始终优先，白名单模式下未列出内容算分心。");
-        floating?.Update(stateText, Clock(seconds), session.State, session.NeedsCheckIn, session.DebtSeconds, o.AlertThresholdSeconds);
+        floating?.Update(stateText, Clock(seconds), session.State, session.NeedsCheckIn, session.PreviewStrength, curve.Maximum);
     }
     internal static string Clock(double seconds)
     {
@@ -362,7 +366,7 @@ public partial class MainWindow : Window
         {
             var preview = ReadStrength(); preview.Validate();
             StrengthValidationLabel.Foreground = (Brush)FindResource("Muted");
-            StrengthValidationLabel.Text = preview.Enabled ? "下图展示首次分心达到提醒线后的前五次递增；重复分心的附加值仍受曲线上限约束。" : "曲线已关闭，不产生曲线反馈。启用后保存方案，在下一次会话生效。";
+            StrengthValidationLabel.Text = preview.Enabled ? "横轴为累计分心秒数，从 0 秒起按起始值计算；图示首次分心的前五次递增。启动延迟在「专注节奏」设置。" : "曲线已关闭，不产生曲线反馈。启用后保存方案，在下一次会话生效。";
             RampChart.Update(preview);
         }
         catch (ArgumentException ex)
@@ -624,6 +628,11 @@ public partial class MainWindow : Window
             await Dispatcher.InvokeAsync(() => { UpdateLayout(); Capture(folder, "PlansRules"); }, DispatcherPriority.ApplicationIdle);
             ShowPlanTab("RhythmEditor");
             await Dispatcher.InvokeAsync(() => { UpdateLayout(); Capture(folder, "PlansRhythm"); }, DispatcherPriority.ApplicationIdle);
+            PageScroll.ScrollToBottom();
+            await Dispatcher.InvokeAsync(() => { UpdateLayout(); Capture(folder, "PlansRhythmTiming"); }, DispatcherPriority.ApplicationIdle);
+            Width = 920; Height = 680;
+            await Dispatcher.InvokeAsync(() => { UpdateLayout(); PageScroll.ScrollToBottom(); UpdateLayout(); Capture(folder, "PlansRhythmTimingCompact"); }, DispatcherPriority.ApplicationIdle);
+            Width = 1180; Height = 830; PageScroll.ScrollToTop();
             DeviceFeedbackBox.IsChecked = true; SaveSettingsClick(this, new RoutedEventArgs());
             StartClick(this, new RoutedEventArgs());
             if (session.IsActive || page != "DevicePage") throw new InvalidOperationException("未授权设备的真实方案仍可启动。");
@@ -655,10 +664,18 @@ public partial class MainWindow : Window
                 }
             }
             ShowPage("FocusPage");
-            for (int i = 0; i < 110; i++) session.Tick(TimeSpan.FromSeconds(1), DateTimeOffset.Now, Attention.Outside, 0);
             CurrentAppLabel.Text = "Example Game"; CurrentUrlLabel.Text = "示例软件黑名单"; DetectionLabel.Text = "当前内容不符合黑白名单";
+            for (int i = 0; i < 9; i++) session.Tick(TimeSpan.FromSeconds(1), DateTimeOffset.Now, Attention.Outside, 0);
+            if (session.PreviewStrength != 0) throw new InvalidOperationException("启动延迟结束前产生了强度。");
             Refresh();
-            if (session.PreviewStrength != 15) throw new InvalidOperationException("模拟强度验证失败。");
+            await Dispatcher.InvokeAsync(() => { UpdateLayout(); Capture(folder, "DistractionCountdown"); }, DispatcherPriority.ApplicationIdle);
+            session.Tick(TimeSpan.FromSeconds(1), DateTimeOffset.Now, Attention.Outside, 0);
+            if (session.PreviewStrength != 10 || session.DebtSeconds != 0) throw new InvalidOperationException("分心满 10 秒时没有以零累计启动。");
+            Refresh();
+            await Dispatcher.InvokeAsync(() => { UpdateLayout(); Capture(folder, "DistractionStarted"); }, DispatcherPriority.ApplicationIdle);
+            for (int i = 0; i < 100; i++) session.Tick(TimeSpan.FromSeconds(1), DateTimeOffset.Now, Attention.Outside, 0);
+            Refresh();
+            if (session.PreviewStrength != 25) throw new InvalidOperationException("模拟强度验证失败。");
             await Dispatcher.InvokeAsync(() => { UpdateLayout(); Capture(folder, "StrengthActive"); }, DispatcherPriority.ApplicationIdle);
             session.Tick(TimeSpan.FromSeconds(1), DateTimeOffset.Now, Attention.Unknown, 0);
             if (session.PreviewStrength != 0) throw new InvalidOperationException("未知状态未清除模拟强度。");
@@ -694,7 +711,7 @@ public partial class MainWindow : Window
             if (Array.IndexOf(args, "--device-test-relay") >= 0)
             {
                 for (int i = 0; i < 301; i++) session.Tick(TimeSpan.FromSeconds(1), DateTimeOffset.Now, Attention.Allowed, 0);
-                SelectPlan(firstId); DeviceFeedbackBox.IsChecked = true; SaveSettingsClick(this, new RoutedEventArgs());
+                SelectPlan(firstId); DeviceFeedbackBox.IsChecked = true; IncidentBoostBox.Text = "0"; SaveSettingsClick(this, new RoutedEventArgs());
                 await device.Connect();
                 var until = Environment.TickCount64 + 4000;
                 while (device.Devices.Count == 0 && Environment.TickCount64 < until) await Task.Delay(20);
@@ -705,11 +722,21 @@ public partial class MainWindow : Window
                 if (!device.IsArmed) throw new InvalidOperationException("本机模拟 App 的设备未能通过界面授权。");
                 StartClick(this, new RoutedEventArgs());
                 if (!session.IsActive || !session.Options.DeviceFeedback) throw new InvalidOperationException("真实设备方案没有启动。");
-                for (int i = 0; i < 110; i++) session.Tick(TimeSpan.FromSeconds(1), DateTimeOffset.Now, Attention.Outside, 0);
+                for (int i = 0; i < 9; i++) session.Tick(TimeSpan.FromSeconds(1), DateTimeOffset.Now, Attention.Outside, 0);
+                device.SetDesired(session.OutputPercent);
+                await Task.Delay(250);
+                if (device.RequestedIntensity != 0) throw new InvalidOperationException("分心未满 10 秒就发送了非零指令。");
+                session.Tick(TimeSpan.FromSeconds(1), DateTimeOffset.Now, Attention.Outside, 0);
+                if (session.DebtSeconds != 0 || session.OutputPercent != 10) throw new InvalidOperationException("零累计未按启动延迟开启反馈。");
                 device.SetDesired(session.OutputPercent);
                 until = Environment.TickCount64 + 2500;
-                while (device.RequestedIntensity == 0 && Environment.TickCount64 < until) await Task.Delay(20);
-                if (device.RequestedIntensity is <= 0 or > 20) throw new InvalidOperationException("方案分心没有产生受上限约束的真实协议指令。");
+                while (device.RequestedIntensity != 2 && Environment.TickCount64 < until) await Task.Delay(20);
+                if (device.RequestedIntensity != 2) throw new InvalidOperationException("分心满 10 秒没有发出起始强度的真实协议指令。");
+                for (int i = 0; i < 30; i++) session.Tick(TimeSpan.FromSeconds(1), DateTimeOffset.Now, Attention.Outside, 0);
+                device.SetDesired(session.OutputPercent);
+                until = Environment.TickCount64 + 2500;
+                while (device.RequestedIntensity != 3 && Environment.TickCount64 < until) await Task.Delay(20);
+                if (device.RequestedIntensity != 3) throw new InvalidOperationException("累计 30 秒没有递增真实协议指令的强度。");
                 Width = 1180; Height = 830; ShowPage("DevicePage"); Refresh();
                 await Dispatcher.InvokeAsync(() => { UpdateLayout(); Capture(folder, "DeviceArmedLocalTest"); }, DispatcherPriority.ApplicationIdle);
                 EmergencyClick(this, new RoutedEventArgs());
@@ -722,7 +749,7 @@ public partial class MainWindow : Window
             File.AppendAllText(Path.Combine(folder, "smoke-result.txt"), "PASS: built-in relay on loopback only: UI generates a QR and manual server address, locks network choices, disconnects and clears credentials. Wide and compact layouts rendered.\n");
             File.AppendAllText(Path.Combine(folder, "smoke-result.txt"), File.ReadAllText(Path.Combine(folder, "app-selection-result.txt")));
             if (Array.IndexOf(args, "--device-test-relay") >= 0)
-                File.AppendAllText(Path.Combine(folder, "smoke-result.txt"), "PASS: local fake App only: UI authorization → selected plan → distraction → bounded V4 requests → emergency stop. No physical device connected.\n");
+                File.AppendAllText(Path.Combine(folder, "smoke-result.txt"), "PASS: local fake App only: UI authorization → selected plan → 10-second activation with zero debt → accumulated-time ramp → bounded V4 requests → emergency stop. No physical device connected.\n");
         }
         catch (Exception e) { File.WriteAllText(Path.Combine(folder, "smoke-result.txt"), "FAIL: " + e); Environment.ExitCode = 1; }
         Quit();

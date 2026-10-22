@@ -52,12 +52,70 @@ Test("app path comparison is exact and case insensitive", () => {
     Equal(Attention.Outside, Rules.Evaluate(rules, @"C:\Other\reader.exe", null, false, false));
 });
 Test("grace period does not charge time retroactively", () => {
-    var s = New(); Advance(s, 10, Attention.Outside); Equal(0d, s.DebtSeconds); Equal(0, s.RecentCount(origin.AddSeconds(10)));
+    var s = New(); Advance(s, 9, Attention.Outside); Equal(0d, s.DebtSeconds); Equal(0d, s.PreviewStrength);
+    Advance(s, 1, Attention.Outside, 9); Equal(0d, s.DebtSeconds); Equal(1, s.RecentCount(origin.AddSeconds(10)));
     Advance(s, 1, Attention.Outside, 10); Equal(1d, s.DebtSeconds); Equal(1, s.RecentCount(origin.AddSeconds(11)));
 });
 Test("continuous distraction counts once and emits one feedback", () => {
     var s = New(); var count = 0; s.Changed += e => { if (e.Kind == "feedback") count++; };
     Advance(s, 180, Attention.Outside); Equal(170d, s.DebtSeconds); Equal(1, s.RecentCount(origin.AddMinutes(3))); Equal(1, count);
+});
+Test("default ten-second activation outputs at the boundary with zero accumulated debt", () => {
+    var s = New(options: new() { FocusMinutes = 0, DeviceFeedback = true });
+    var feedback = new List<SessionEvent>(); s.Changed += e => { if (e.Kind == "feedback") feedback.Add(e); };
+    Advance(s, 9, Attention.Outside); Equal(0d, s.OutputPercent); Equal(0, feedback.Count);
+    Advance(s, 1, Attention.Outside, 9); Equal(10d, s.OutputPercent); Equal(0d, s.DebtSeconds);
+    Equal(1, feedback.Count); Equal(origin.AddSeconds(10), feedback[0].At);
+    Advance(s, 29, Attention.Outside, 10); Equal(10d, s.OutputPercent); Equal(29d, s.DebtSeconds);
+    Advance(s, 1, Attention.Outside, 39); Equal(15d, s.OutputPercent); Equal(30d, s.DebtSeconds); Equal(1, feedback.Count);
+});
+Test("custom fractional activation handles a tick crossing the delay without retroactive debt", () => {
+    var s = New(options: new() { FocusMinutes = 0, DeviceFeedback = true, GraceSeconds = 2.5 });
+    s.Tick(TimeSpan.FromSeconds(2.25), origin.AddSeconds(2.25), Attention.Outside, 0); Equal(0d, s.OutputPercent);
+    s.Tick(TimeSpan.FromSeconds(.5), origin.AddSeconds(2.75), Attention.Outside, 0);
+    Equal(10d, s.OutputPercent); Equal(.25d, s.DebtSeconds); Equal(1, s.RecentCount(origin.AddSeconds(2.75)));
+});
+Test("activation delay rejects invalid values and accepts the supported endpoints", () => {
+    foreach (var delay in new[] { 0, -1, .99, 300.01, double.NaN, double.PositiveInfinity }) {
+        var rejected = false;
+        try { new SessionOptions { GraceSeconds = delay }.Validate(); } catch (ArgumentException) { rejected = true; }
+        True(rejected);
+    }
+    foreach (var delay in new[] { 1d, 2.5, 300 }) new SessionOptions { GraceSeconds = delay }.Validate();
+});
+Test("legacy cumulative threshold is ignored when an existing plan is read", () => {
+    var options = JsonSerializer.Deserialize<SessionOptions>("""{"FocusMinutes":0,"GraceSeconds":10,"AlertThresholdSeconds":3600,"DeviceFeedback":true}""")!;
+    var s = New(options: options); Advance(s, 10, Attention.Outside);
+    Equal(10d, s.OutputPercent); Equal(0d, s.DebtSeconds);
+    True(!JsonSerializer.Serialize(options).Contains("AlertThresholdSeconds"));
+});
+Test("existing debt raises the next episode strength but never skips its activation delay", () => {
+    var s = New(options: new() { FocusMinutes = 0, DeviceFeedback = true, StrengthPreview = new() { IncidentIncrement = 0 } });
+    Advance(s, 40, Attention.Outside); Equal(30d, s.DebtSeconds); Equal(15d, s.OutputPercent);
+    Advance(s, 5, Attention.Allowed, 40); Equal(0d, s.OutputPercent);
+    Advance(s, 9, Attention.Outside, 45); Equal(0d, s.OutputPercent); Equal(30d, s.DebtSeconds);
+    Advance(s, 1, Attention.Outside, 54); Equal(15d, s.OutputPercent);
+    Advance(s, 30, Attention.Outside, 55); Equal(60d, s.DebtSeconds); Equal(20d, s.OutputPercent);
+});
+Test("unknown, panel and learning interruptions each restart the activation delay", () => {
+    foreach (var state in new[] { Attention.Unknown, Attention.Neutral, Attention.Allowed }) {
+        var s = New(options: new() { FocusMinutes = 0, DeviceFeedback = true });
+        Advance(s, 9, Attention.Outside); Advance(s, 1, state, 9); Advance(s, 9, Attention.Outside, 10);
+        Equal(0d, s.OutputPercent); Equal(0d, s.DebtSeconds); Equal(0, s.RecentCount(origin.AddSeconds(19)));
+        Advance(s, 1, Attention.Outside, 19); Equal(10d, s.OutputPercent);
+    }
+});
+Test("focus recovery lowers strength on the next activation while preserving the delay", () => {
+    var s = New(options: new() { FocusMinutes = 0, DeviceFeedback = true, RecoveryDelaySeconds = 5, RecoveryRate = 1,
+        StrengthPreview = new() { IncidentIncrement = 0 } });
+    Advance(s, 70, Attention.Outside); Equal(20d, s.OutputPercent);
+    Advance(s, 35, Attention.Allowed, 70); Equal(30d, s.DebtSeconds); Equal(0d, s.OutputPercent);
+    Advance(s, 10, Attention.Outside, 105); Equal(15d, s.OutputPercent);
+});
+Test("each continuous activation emits one alert without multiplying incidents on a brief return", () => {
+    var s = New(); var alerts = 0; s.Changed += e => { if (e.Kind == "feedback") alerts++; };
+    Advance(s, 10, Attention.Outside); Advance(s, 1, Attention.Allowed, 10); Advance(s, 10, Attention.Outside, 11);
+    Equal(2, alerts); Equal(1, s.RecentCount(origin.AddSeconds(21))); Equal(0d, s.DebtSeconds);
 });
 Test("brief allowed-window flashes cannot multiply episodes", () => {
     var s = New(); Advance(s, 12, Attention.Outside); Advance(s, 1, Attention.Allowed, 12); Advance(s, 12, Attention.Outside, 13);
@@ -126,7 +184,7 @@ Test("restart retains quota, incidents and pending-exit remaining time", () => {
 });
 Test("hour window expires exactly at boundary", () => {
     var s = New(); Advance(s, 11, Attention.Outside);
-    Equal(1, s.RecentCount(origin.AddSeconds(3610))); Equal(0, s.RecentCount(origin.AddSeconds(3611)));
+    Equal(1, s.RecentCount(origin.AddSeconds(3609))); Equal(0, s.RecentCount(origin.AddSeconds(3610)));
 });
 Test("fixed focus and rest complete a single session", () => {
     var s = New(options: new() { FocusMinutes = 1, RestMinutes = 1 }); Advance(s, 60); Equal(SessionState.Resting, s.State);
@@ -213,15 +271,15 @@ Test("mixed blacklist policy and rules survive a restart", () => {
     Equal(RuleMode.Blacklist, restored.Options.ApplicationMode); Equal(RuleMode.Blacklist, restored.Options.WebsiteMode);
     Equal(RuleAction.Block, restored.Rules.Single().Action); Equal(SessionState.Suspended, restored.State);
 });
-Test("strength preview starts at threshold, increments by time and respects ceiling", () => {
+Test("strength curve starts at zero debt, increments by cumulative time and respects ceiling", () => {
     var p = new StrengthPreviewOptions { Enabled = true, Initial = 10, Maximum = 25, Increment = 5, IntervalSeconds = 30 };
-    Equal(0d, p.At(59, 60)); Equal(10d, p.At(60, 60)); Equal(10d, p.At(89, 60)); Equal(15d, p.At(90, 60));
-    Equal(25d, p.At(150, 60)); Equal(25d, p.At(100000, 60));
-    Equal(10d, p.At(60, 60)); // A reduced cumulative time naturally selects the lower preview level.
+    Equal(0d, p.At(-1)); Equal(0d, p.At(double.NaN)); Equal(10d, p.At(0)); Equal(10d, p.At(29)); Equal(15d, p.At(30));
+    Equal(25d, p.At(90)); Equal(25d, p.At(100000));
+    Equal(10d, p.At(0)); // A reduced cumulative time naturally selects the lower preview level.
 });
 Test("disabled and zero-ceiling previews remain zero", () => {
-    Equal(0d, new StrengthPreviewOptions { Enabled = false, Initial = 10, Maximum = 50 }.At(9999, 60));
-    Equal(0d, new StrengthPreviewOptions { Enabled = true, Initial = 0, Maximum = 0 }.At(9999, 60));
+    Equal(0d, new StrengthPreviewOptions { Enabled = false, Initial = 10, Maximum = 50 }.At(9999));
+    Equal(0d, new StrengthPreviewOptions { Enabled = true, Initial = 0, Maximum = 0 }.At(9999));
 });
 Test("strength profile rejects invalid ranges and non-finite numbers", () => {
     foreach (var p in new StrengthPreviewOptions[] {
@@ -232,15 +290,15 @@ Test("strength profile rejects invalid ranges and non-finite numbers", () => {
 Test("live preview clears immediately on learning, neutral and unknown states", () => {
     foreach (var state in new[] { Attention.Allowed, Attention.Neutral, Attention.Unknown }) {
         var s = New(options: new() { FocusMinutes = 0, StrengthPreview = new() { Enabled = true, Initial = 10, Maximum = 25, Increment = 5, IntervalSeconds = 30 } });
-        Advance(s, 110, Attention.Outside); Equal(15d, s.PreviewStrength);
+        Advance(s, 110, Attention.Outside); Equal(25d, s.PreviewStrength);
         Advance(s, 1, state, 110); Equal(0d, s.PreviewStrength); True(s.DebtSeconds > 0);
     }
 });
 Test("new distraction grace does not reuse an earlier preview level", () => {
     var s = New(options: new() { FocusMinutes = 0, StrengthPreview = new() { Enabled = true, Initial = 10, Maximum = 25 } });
     Advance(s, 80, Attention.Outside); True(s.PreviewStrength > 0);
-    Advance(s, 5, Attention.Allowed, 80); Advance(s, 10, Attention.Outside, 85); Equal(0d, s.PreviewStrength);
-    Advance(s, 1, Attention.Outside, 95); True(s.PreviewStrength > 0);
+    Advance(s, 5, Attention.Allowed, 80); Advance(s, 9, Attention.Outside, 85); Equal(0d, s.PreviewStrength);
+    Advance(s, 1, Attention.Outside, 94); True(s.PreviewStrength > 0);
 });
 Test("pause, restart, rest and check-in never retain active preview strength", () => {
     var s = New(options: new() { FocusMinutes = 0, IdleSeconds = 180, StrengthPreview = new() { Enabled = true, Initial = 10, Maximum = 25 } });
@@ -258,7 +316,7 @@ Test("new plans enable a visible bounded curve by default", () => {
     var plan = new FocusPlan(); plan.Validate();
     True(plan.Options.StrengthPreview.Enabled);
     True(plan.Options.StrengthPreview.Maximum > plan.Options.StrengthPreview.Initial);
-    True(plan.Options.StrengthPreview.At(60, 60) > 0);
+    True(plan.Options.StrengthPreview.At(0) > 0);
 });
 Test("session cannot start without a chosen plan", () => {
     var s = new Session(); var rejected = false;
@@ -293,8 +351,8 @@ Test("active plan remains fixed even if a different plan is passed", () => {
 
 Test("repeat distraction raises the curve only inside its configured ceiling", () => {
     var curve = new StrengthPreviewOptions { Initial = 10, Maximum = 30, Increment = 5, IntervalSeconds = 30, IncidentIncrement = 8 };
-    Equal(10d, curve.At(60, 60, 1)); Equal(18d, curve.At(60, 60, 2)); Equal(30d, curve.At(60, 60, 100));
-    Equal(0d, curve.At(59, 60, 100));
+    Equal(10d, curve.At(0, 1)); Equal(18d, curve.At(0, 2)); Equal(30d, curve.At(0, 100));
+    Equal(23d, curve.At(30, 2)); Equal(30d, curve.At(300, 2));
 });
 Test("idle counting is an explicit computer policy and still respects unknown detection", () => {
     var s = New(options: new() { FocusMinutes = 0, IdleSeconds = 30, IdlePolicy = IdlePolicy.CountAsDistraction, GraceSeconds = 1 });

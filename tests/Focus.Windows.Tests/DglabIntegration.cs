@@ -168,6 +168,7 @@ internal static class DglabIntegration
                 assert(process.ExitCode == 0 && result.Contains("UI authorization"), "Windows UI connects a local fake App, arms, starts its plan, emits bounded requests and stops immediately: " + (process.ExitCode == 0 ? "PASS" : result));
                 assert(result.Contains("native window activation"), "Windows UI enumerates two fixture windows, merges them, captures a real WinEvent notification and applies its executable rule");
                 assert(result.Contains("desktop extension setup"), "Windows UI prepares an automatically paired extension and distinguishes pending installation from an actual connection");
+                assert(result.Contains("10-second activation with zero debt → accumulated-time ramp"), "Windows UI issues zero before 10 seconds, starts V4 output with zero debt at 10 seconds, and raises intensity after 30 accumulated seconds");
             }
             finally
             {

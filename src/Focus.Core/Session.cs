@@ -15,7 +15,6 @@ public sealed record SessionOptions
     public bool DeviceFeedback { get; init; }
     public IdlePolicy IdlePolicy { get; init; }
     public double GraceSeconds { get; init; } = 10;
-    public double AlertThresholdSeconds { get; init; } = 60;
     public double RecoveryDelaySeconds { get; init; } = 120;
     public double RecoveryRate { get; init; } = 0.5;
     public double IdleSeconds { get; init; } = 180;
@@ -29,7 +28,6 @@ public sealed record SessionOptions
         if (!double.IsFinite(FocusMinutes) || FocusMinutes < 0 || FocusMinutes > 1440
             || !double.IsFinite(RestMinutes) || RestMinutes < 0 || RestMinutes > 240
             || !double.IsFinite(GraceSeconds) || GraceSeconds < 1 || GraceSeconds > 300
-            || !double.IsFinite(AlertThresholdSeconds) || AlertThresholdSeconds < 5 || AlertThresholdSeconds > 3600
             || !double.IsFinite(RecoveryDelaySeconds) || RecoveryDelaySeconds < 0 || RecoveryDelaySeconds > 3600
             || !double.IsFinite(RecoveryRate) || RecoveryRate <= 0 || RecoveryRate > 10
             || !double.IsFinite(IdleSeconds) || IdleSeconds < 30 || IdleSeconds > 3600
@@ -79,11 +77,11 @@ public sealed class Session
     public bool IsActive => State is SessionState.Focusing or SessionState.Resting or SessionState.ExitPending or SessionState.Suspended;
     public event Action<SessionEvent>? Changed;
     private double outsideSeconds, recoverySeconds;
-    private bool incidentCounted, alerted, restEndsSession;
+    private bool incidentCounted, restEndsSession;
     private bool previewEligible;
     private DateTimeOffset tickAt;
     public double PreviewStrength => previewEligible && !NeedsCheckIn && State is SessionState.Focusing or SessionState.ExitPending
-        ? Options.StrengthPreview.At(DebtSeconds, Options.AlertThresholdSeconds, RecentCount(tickAt)) : 0;
+        ? Options.StrengthPreview.At(DebtSeconds, RecentCount(tickAt)) : 0;
     public double OutputPercent => Options.DeviceFeedback ? PreviewStrength : 0;
     public int RecentCount(DateTimeOffset now) => Incidents.Count(x => x > now.AddHours(-1) && x <= now);
 
@@ -104,7 +102,7 @@ public sealed class Session
         TemporaryHost = null;
         FocusSeconds = SegmentSeconds = DebtSeconds = SinceCheckIn = RestRemaining = ExitRemaining = 0;
         outsideSeconds = recoverySeconds = 0;
-        NeedsCheckIn = incidentCounted = alerted = restEndsSession = false;
+        NeedsCheckIn = incidentCounted = restEndsSession = false;
         previewEligible = false;
         State = SessionState.Focusing;
         tickAt = now;
@@ -247,22 +245,22 @@ public sealed class Session
             recoverySeconds = 0;
             var before = outsideSeconds;
             outsideSeconds += seconds;
-            previewEligible = outsideSeconds > Options.GraceSeconds;
+            // Activation depends only on this continuous distraction, never on accumulated debt.
+            previewEligible = outsideSeconds >= Options.GraceSeconds;
             var increment = Math.Max(0, outsideSeconds - Options.GraceSeconds) - Math.Max(0, before - Options.GraceSeconds);
             DebtSeconds += increment;
-            if (!incidentCounted && outsideSeconds > Options.GraceSeconds)
+            if (!incidentCounted && previewEligible)
             {
                 incidentCounted = true;
                 Incidents.Add(now);
-                Emit(now, "distraction", "离开允许内容超过宽限期，开始累计分心时间。");
+                Emit(now, "distraction", "连续分心达到启动时间，开始累计用于递增强度的分心时间。");
             }
-            if (!alerted && DebtSeconds >= Options.AlertThresholdSeconds)
+            if (before < Options.GraceSeconds && previewEligible)
             {
-                alerted = true;
                 var level = Math.Clamp(RecentCount(now), 1, 3);
-                Emit(now, "feedback", "累计分心已达到提醒线，请回到学习内容。", level);
+                Emit(now, "feedback", $"连续分心已达 {Options.GraceSeconds:0.##} 秒，请回到学习内容。", level);
             }
-            StatusReason = outsideSeconds <= Options.GraceSeconds ? $"切换宽限期，剩余 {Math.Ceiling(Options.GraceSeconds - outsideSeconds)} 秒。" : "当前内容未放行，分心时间正在累计。";
+            StatusReason = !previewEligible ? $"连续分心，再过 {Math.Ceiling(Options.GraceSeconds - outsideSeconds)} 秒启动反馈。" : "连续分心达到启动时间，按累计分心计算强度。";
         }
         else
         {
@@ -273,7 +271,6 @@ public sealed class Session
             if (recoverySeconds >= 5) incidentCounted = false;
             var recover = Math.Max(0, recoverySeconds - Options.RecoveryDelaySeconds) - Math.Max(0, before - Options.RecoveryDelaySeconds);
             DebtSeconds = Math.Max(0, DebtSeconds - recover * Options.RecoveryRate);
-            if (DebtSeconds < Options.AlertThresholdSeconds * 0.5) alerted = false;
             StatusReason = DebtSeconds == 0 ? "正在使用允许的学习内容。" : recoverySeconds < Options.RecoveryDelaySeconds
                 ? $"持续专注 {Math.Ceiling(Options.RecoveryDelaySeconds - recoverySeconds)} 秒后开始消除累计时间。" : "持续专注中，累计分心时间正在减少。";
         }
