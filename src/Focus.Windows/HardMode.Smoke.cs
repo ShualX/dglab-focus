@@ -32,7 +32,14 @@ public partial class MainWindow
         for (int i = 0; i < 10; i++) session.Tick(TimeSpan.FromSeconds(1), DateTimeOffset.Now, Attention.Outside, 0);
         Refresh();
         if (session.PreviewStrength <= 0) throw new InvalidOperationException("狠心模式没有遵循启动延迟。");
-        EmergencyClick(this, new RoutedEventArgs());
+        TutorialMenuClick(this, new RoutedEventArgs());
+        if (TutorialEmergencyButton.Visibility != Visibility.Visible || !session.IsHardModeLocked || session.State != SessionState.Focusing)
+            throw new InvalidOperationException("锁定会话中的教程隐藏了急停入口或修改了会话。");
+        TutorialEmergencyClick(this, new RoutedEventArgs());
+        if (!TutorialLiveStatusLabel.Text.Contains("会话已暂停") || TutorialLiveStatusLabel.Visibility != Visibility.Visible)
+            throw new InvalidOperationException("教程急停结果没有在固定操作区显示。");
+        await Dispatcher.InvokeAsync(() => { UpdateLayout(); Capture(folder, "TutorialHardModeEmergency"); }, DispatcherPriority.ApplicationIdle);
+        TutorialSkipClick(this, new RoutedEventArgs());
         if (session.State != SessionState.Suspended || session.PreviewStrength != 0 || device.IsArmed || !session.IsHardModeLocked)
             throw new InvalidOperationException("狠心模式阻止了急停或急停丢失了原会话。");
         closingAttempt = new CancelEventArgs(); WindowClosing(this, closingAttempt);
@@ -43,6 +50,6 @@ public partial class MainWindow
         if (session.State != SessionState.Completed || session.IsHardModeLocked)
             throw new InvalidOperationException("狠心模式没有在固定时长后自动结束。");
         ReplacePlan(original); SelectPlan(planId); Width = 1180; Height = 830;
-        File.WriteAllText(Path.Combine(folder, "hard-mode-result.txt"), "PASS: hard mode rejects unlimited duration and ordinary exit, rest, tray close and window close; emergency stop remains available; the original session resumes and ends at its finite deadline.\n");
+        File.WriteAllText(Path.Combine(folder, "hard-mode-result.txt"), "PASS: hard mode rejects unlimited duration and ordinary exit, rest, tray close and window close; tutorial preserves the locked session and its emergency stop; the original session resumes and ends at its finite deadline.\n");
     }
 }

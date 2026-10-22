@@ -171,6 +171,9 @@ internal static class DglabIntegration
                 assert(result.Contains("10-second activation with zero debt → accumulated-time ramp"), "Windows UI issues zero before 10 seconds, starts V4 output with zero debt at 10 seconds, and raises intensity after 30 accumulated seconds");
                 assert(result.Contains("Live requested intensity in main header"), "Windows UI shows live requests 2 → 3 in the header and floating ball, then clears them on emergency stop");
                 assert(result.Contains("hard mode rejects unlimited duration"), "hard-mode UI locks normal exit, early rest and app close while preserving emergency stop and fixed-duration completion");
+                assert(result.Contains("first-run tutorial, all eight steps"), "first launch and help replay show all eight tutorial steps, navigate settings, support skip/completion and preserve user configuration");
+                assert(result.Contains("tutorial preserves the locked session and its emergency stop"), "tutorial remains readable during hard mode and never blocks emergency stop or unlocks the session");
+                assert(result.Contains("Allowed-content idle 5+10 seconds"), "allowed-content inactivity issues a bounded V4 request after five idle seconds plus ten distraction seconds, then clears on new input");
             }
             finally
             {

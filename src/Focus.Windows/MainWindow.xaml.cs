@@ -55,6 +55,8 @@ public partial class MainWindow : Window
         device = new DglabController(testRelay);
         storage = new Storage(smoke);
         settings = storage.Load();
+        focusMottoIndex = FocusMottos.Pick(settings.LastMottoIndex);
+        settings.LastMottoIndex = focusMottoIndex;
         session = settings.Session != null ? Session.Restore(settings.Session) : new Session();
         plans = new(settings.Plans ?? []);
         selectedPlanId = session.IsActive ? session.PlanId : settings.SelectedPlanId;
@@ -108,6 +110,7 @@ public partial class MainWindow : Window
         });
         timer.Tick += (_, _) => Tick();
         PreviewKeyDown += KeyDownHandler;
+        PreviewMouseLeftButtonDown += MottoPointerClick;
         SizeChanged += (_, _) => { Dial.Height = ActualHeight < 760 ? 232 : 294; RunningAppList.MaxHeight = ActualHeight < 760 ? 160 : 228; };
         ApplyHighContrast();
         SystemParameters.StaticPropertyChanged += SystemPropertyChanged;
@@ -115,7 +118,7 @@ public partial class MainWindow : Window
             Loaded += async (_, _) => await RunSmoke(args);
         else
         {
-            Loaded += async (_, _) => await bridge.StartAsync();
+            Loaded += async (_, _) => { TryShowFirstRunTutorial(); Save(); await bridge.StartAsync(); };
             SystemEvents.SessionSwitch += SessionSwitch;
             SystemEvents.PowerModeChanged += PowerChanged;
             CreateTray();
@@ -273,6 +276,7 @@ public partial class MainWindow : Window
         RuleLockLabel.Text = summary + (session.IsActive ? "本次会话规则与模式已锁定。" : "黑名单始终优先，白名单模式下未列出内容算分心。");
         floating?.Update(stateText, Clock(seconds), session.State, session.NeedsCheckIn, session.IsHardModeLocked);
         RefreshOutputDisplay();
+        RefreshTutorialStatus();
     }
     internal static string Clock(double seconds)
     {
@@ -297,8 +301,11 @@ public partial class MainWindow : Window
             "SettingsPage" => ("偏好设置", "调整提示音与界面动态效果。"),
             "DevicePage" => ("设备与浏览器", "所有专注判断在本机完成。"),
             "HistoryPage" => ("会话记录", "查看规则变化与提醒发生的时间。"),
-            _ => ("专注控制台", "把注意力留在当前这一段。")
+            _ => ("专注控制台", FocusMottos.Lines[focusMottoIndex])
         };
+        PageSubtitle.Focusable = name == "FocusPage";
+        PageSubtitle.Cursor = name == "FocusPage" ? Cursors.Hand : Cursors.Arrow;
+        PageSubtitle.ToolTip = name == "FocusPage" ? "点击软件内任意位置换一句；此处也可按回车或空格切换" : null;
         foreach (var button in LogicalTreeHelpers.Children<Button>(RootGrid).Where(x => x.Style == FindResource("Nav")))
         {
             var selected = (string?)button.Tag == name;
@@ -437,6 +444,7 @@ public partial class MainWindow : Window
         if (floating == null)
         {
             floating = new FloatingWindow();
+            floating.PreviewMouseLeftButtonDown += MottoPointerClick;
             floating.OpenRequested += ShowMain;
             floating.ExitRequested += () => ExitClick(this, new RoutedEventArgs());
             floating.CancelRequested += () => CancelExitClick(this, new RoutedEventArgs());
@@ -501,6 +509,9 @@ public partial class MainWindow : Window
     }
     private void KeyDownHandler(object sender, KeyEventArgs e)
     {
+        if (e.Key == Key.F1) { TutorialMenuClick(this, new RoutedEventArgs()); e.Handled = true; return; }
+        if (e.Key == Key.Escape && TutorialOverlay.Visibility == Visibility.Visible)
+        { TutorialSkipClick(this, new RoutedEventArgs()); e.Handled = true; return; }
         if (e.Key == Key.Escape && appSelectionPlan != null)
         { CancelAppSelectionClick(this, new RoutedEventArgs()); e.Handled = true; return; }
         if (Keyboard.Modifiers != ModifierKeys.Control) return;
@@ -511,7 +522,9 @@ public partial class MainWindow : Window
     private void ZoomOutClick(object sender, RoutedEventArgs e) => SetZoom(Math.Max(1, zoom - .1));
     private void SetZoom(double value)
     {
-        zoom = value; RootGrid.LayoutTransform = new ScaleTransform(zoom, zoom);
+        zoom = value;
+        if (zoom == 1) RootGrid.ClearValue(LayoutTransformProperty);
+        else RootGrid.LayoutTransform = new ScaleTransform(zoom, zoom);
         MinWidth = 920 * zoom; MinHeight = 680;
         Width = Math.Max(Width, MinWidth);
     }
@@ -605,6 +618,7 @@ public partial class MainWindow : Window
         Directory.CreateDirectory(folder);
         try
         {
+            await RunTutorialSmoke(folder);
             if (StartButton.IsEnabled) throw new InvalidOperationException("未选方案时启动按钮应禁用。");
             StartClick(this, new RoutedEventArgs());
             if (session.IsActive || page != "PlansPage") throw new InvalidOperationException("菜单绕过了必选方案限制。");
@@ -749,6 +763,22 @@ public partial class MainWindow : Window
                 if (!device.IsArmed) throw new InvalidOperationException("本机模拟 App 的设备未能通过界面授权。");
                 StartClick(this, new RoutedEventArgs());
                 if (!session.IsActive || !session.Options.DeviceFeedback) throw new InvalidOperationException("真实设备方案没有启动。");
+                for (int i = 1; i <= 14; i++) session.Tick(TimeSpan.FromSeconds(1), DateTimeOffset.Now, Attention.Allowed, i);
+                device.SetDesired(session.OutputPercent); await Task.Delay(250);
+                if (session.OutputPercent != 0 || device.RequestedIntensity != 0) throw new InvalidOperationException("允许内容的无操作计时提前产生了输出。");
+                session.Tick(TimeSpan.FromSeconds(1), DateTimeOffset.Now, Attention.Allowed, 15);
+                device.SetDesired(session.OutputPercent);
+                until = Environment.TickCount64 + 2500;
+                while (device.RequestedIntensity != 2 && Environment.TickCount64 < until) await Task.Delay(20);
+                if (device.RequestedIntensity != 2 || session.DebtSeconds != 0) throw new InvalidOperationException("允许内容未在无操作 5 秒加启动延迟 10 秒后发出指令。");
+                ShowPage("FocusPage"); CurrentAppLabel.Text = "Study Reader"; CurrentUrlLabel.Text = "示例允许的软件"; DetectionLabel.Text = "允许的学习内容";
+                Refresh();
+                await Dispatcher.InvokeAsync(() => { UpdateLayout(); Capture(folder, "AllowedIdleOutput"); }, DispatcherPriority.ApplicationIdle);
+                session.Tick(TimeSpan.FromSeconds(1), DateTimeOffset.Now, Attention.Allowed, 0);
+                device.SetDesired(session.OutputPercent);
+                until = Environment.TickCount64 + 2500;
+                while (device.RequestedIntensity != 0 && Environment.TickCount64 < until) await Task.Delay(20);
+                if (device.RequestedIntensity != 0) throw new InvalidOperationException("允许内容恢复键鼠操作后没有清零请求。");
                 for (int i = 0; i < 9; i++) session.Tick(TimeSpan.FromSeconds(1), DateTimeOffset.Now, Attention.Outside, 0);
                 device.SetDesired(session.OutputPercent);
                 await Task.Delay(250);
@@ -801,8 +831,9 @@ public partial class MainWindow : Window
             File.AppendAllText(Path.Combine(folder, "smoke-result.txt"), "PASS: built-in relay on loopback only: UI generates a QR and manual server address, locks network choices, disconnects and clears credentials. Wide and compact layouts rendered.\n");
             File.AppendAllText(Path.Combine(folder, "smoke-result.txt"), File.ReadAllText(Path.Combine(folder, "app-selection-result.txt")));
             File.AppendAllText(Path.Combine(folder, "smoke-result.txt"), File.ReadAllText(Path.Combine(folder, "hard-mode-result.txt")));
+            File.AppendAllText(Path.Combine(folder, "smoke-result.txt"), File.ReadAllText(Path.Combine(folder, "tutorial-result.txt")));
             if (Array.IndexOf(args, "--device-test-relay") >= 0)
-                File.AppendAllText(Path.Combine(folder, "smoke-result.txt"), "PASS: local fake App only: UI authorization → selected plan → 10-second activation with zero debt → accumulated-time ramp → bounded V4 requests → emergency stop. Live requested intensity in main header, collapsed ball and expanded panel follows controller changes and clears on stop. No physical device connected.\n");
+                File.AppendAllText(Path.Combine(folder, "smoke-result.txt"), "PASS: local fake App only: UI authorization → selected plan → 10-second activation with zero debt → accumulated-time ramp → bounded V4 requests → emergency stop. Live requested intensity in main header, collapsed ball and expanded panel follows controller changes and clears on stop. Allowed-content idle 5+10 seconds emits bounded output; new input clears it. No physical device connected.\n");
         }
         catch (Exception e) { File.WriteAllText(Path.Combine(folder, "smoke-result.txt"), "FAIL: " + e); Environment.ExitCode = 1; }
         Quit();
@@ -811,7 +842,10 @@ public partial class MainWindow : Window
     {
         var bitmap = new RenderTargetBitmap((int)Math.Ceiling(RootGrid.ActualWidth), (int)Math.Ceiling(RootGrid.ActualHeight), 96, 96, PixelFormats.Pbgra32);
         var visual = new DrawingVisual();
-        using (var dc = visual.RenderOpen()) dc.DrawRectangle(new VisualBrush(RootGrid), null, new Rect(0, 0, RootGrid.ActualWidth, RootGrid.ActualHeight));
+        var bounds = new Rect(0, 0, RootGrid.ActualWidth, RootGrid.ActualHeight);
+        var offset = VisualTreeHelper.GetOffset(RootGrid);
+        using (var dc = visual.RenderOpen()) dc.DrawRectangle(new VisualBrush(RootGrid)
+        { ViewboxUnits = BrushMappingMode.Absolute, Viewbox = new Rect(offset.X, offset.Y, bounds.Width, bounds.Height), Stretch = Stretch.Fill }, null, bounds);
         bitmap.Render(visual); var encoder = new PngBitmapEncoder(); encoder.Frames.Add(BitmapFrame.Create(bitmap));
         using var file = File.Create(Path.Combine(folder, name + ".png")); encoder.Save(file);
     }

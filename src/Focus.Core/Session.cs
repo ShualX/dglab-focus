@@ -14,11 +14,11 @@ public sealed record SessionOptions
     public RuleMode WebsiteMode { get; init; }
     public StrengthPreviewOptions StrengthPreview { get; init; } = new();
     public bool DeviceFeedback { get; init; }
-    public IdlePolicy IdlePolicy { get; init; }
+    public IdlePolicy IdlePolicy { get; init; } = IdlePolicy.CountAsDistraction;
     public double GraceSeconds { get; init; } = 10;
     public double RecoveryDelaySeconds { get; init; } = 120;
     public double RecoveryRate { get; init; } = 0.5;
-    public double IdleSeconds { get; init; } = 180;
+    public double IdleSeconds { get; init; } = 5;
     public double CheckInMinutes { get; init; } = 15;
     public void Validate()
     {
@@ -33,7 +33,7 @@ public sealed record SessionOptions
             || !double.IsFinite(GraceSeconds) || GraceSeconds < 1 || GraceSeconds > 300
             || !double.IsFinite(RecoveryDelaySeconds) || RecoveryDelaySeconds < 0 || RecoveryDelaySeconds > 3600
             || !double.IsFinite(RecoveryRate) || RecoveryRate <= 0 || RecoveryRate > 10
-            || !double.IsFinite(IdleSeconds) || IdleSeconds < 30 || IdleSeconds > 3600
+            || !double.IsFinite(IdleSeconds) || IdleSeconds < 1 || IdleSeconds > 3600
             || !double.IsFinite(CheckInMinutes) || CheckInMinutes < 1 || CheckInMinutes > 120)
             throw new ArgumentException("计时参数不在允许范围内。");
     }
@@ -229,9 +229,10 @@ public sealed class Session
             return;
         }
 
-        var computerIdle = Options.Mode == StudyMode.Computer && idleSeconds >= Options.IdleSeconds && SinceCheckIn >= Options.IdleSeconds;
+        var inputIdle = double.IsFinite(idleSeconds) ? Math.Min(Math.Max(0, idleSeconds), SinceCheckIn) : 0;
+        var idleReached = inputIdle >= Options.IdleSeconds;
         NeedsCheckIn = Options.Mode == StudyMode.Computer
-            ? computerIdle && Options.IdlePolicy == IdlePolicy.ConfirmOnly
+            ? idleReached && Options.IdlePolicy == IdlePolicy.ConfirmOnly
             : SinceCheckIn >= Options.CheckInMinutes * 60;
         if (Options.Mode == StudyMode.Paper || NeedsCheckIn)
         {
@@ -239,19 +240,25 @@ public sealed class Session
             ResetContinuity();
             return;
         }
-        if (computerIdle && Options.IdlePolicy == IdlePolicy.CountAsDistraction && attention != Attention.Unknown)
-            attention = Attention.Outside;
         if (attention is Attention.Unknown or Attention.Neutral)
         {
             StatusReason = attention == Attention.Unknown ? "检测状态未知，暂停累计与恢复。" : "正在操作专注面板，暂停累计与恢复。";
             ResetContinuity();
             return;
         }
+        var outsideDelta = seconds;
+        var inactivityDistraction = attention == Attention.Allowed && idleReached && Options.IdlePolicy == IdlePolicy.CountAsDistraction;
+        if (inactivityDistraction)
+        {
+            attention = Attention.Outside;
+            // Only the part after the inactivity threshold enters the continuous distraction timer.
+            outsideDelta = Math.Clamp(inputIdle - Options.IdleSeconds, 0, seconds);
+        }
         if (attention == Attention.Outside)
         {
             recoverySeconds = 0;
             var before = outsideSeconds;
-            outsideSeconds += seconds;
+            outsideSeconds += outsideDelta;
             // Activation depends only on this continuous distraction, never on accumulated debt.
             previewEligible = outsideSeconds >= Options.GraceSeconds;
             var increment = Math.Max(0, outsideSeconds - Options.GraceSeconds) - Math.Max(0, before - Options.GraceSeconds);
@@ -267,7 +274,9 @@ public sealed class Session
                 var level = Math.Clamp(RecentCount(now), 1, 3);
                 Emit(now, "feedback", $"连续分心已达 {Options.GraceSeconds:0.##} 秒，请回到学习内容。", level);
             }
-            StatusReason = !previewEligible ? $"连续分心，再过 {Math.Ceiling(Options.GraceSeconds - outsideSeconds)} 秒启动反馈。" : "连续分心达到启动时间，按累计分心计算强度。";
+            StatusReason = !previewEligible ? (inactivityDistraction ? $"无操作已满 {Options.IdleSeconds:0.##} 秒，" : "连续分心，")
+                + $"再过 {Math.Ceiling(Options.GraceSeconds - outsideSeconds)} 秒启动反馈。"
+                : inactivityDistraction ? "无操作触发分心，按累计分心计算强度。" : "连续分心达到启动时间，按累计分心计算强度。";
         }
         else
         {

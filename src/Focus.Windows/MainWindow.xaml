@@ -7,7 +7,7 @@
   </Window.Resources>
   <DockPanel>
     <Menu DockPanel.Dock="Top">
-      <MenuItem Header="会话(_S)">
+      <MenuItem x:Name="SessionMenu" Header="会话(_S)">
         <MenuItem Header="开始 / 继续" Click="StartClick"/>
         <MenuItem x:Name="ExitMenuItem" Header="申请退出（等待 5 分钟）" Click="ExitClick"/>
         <MenuItem Header="取消退出" Click="CancelExitClick"/>
@@ -20,6 +20,7 @@
         <MenuItem Header="界面缩小" InputGestureText="Ctrl+-" Click="ZoomOutClick"/>
       </MenuItem>
       <MenuItem Header="帮助(_H)">
+        <MenuItem x:Name="TutorialMenuItem" Header="新手教程" InputGestureText="F1" Click="TutorialMenuClick"/>
         <MenuItem Header="使用说明" Click="HelpClick"/>
         <MenuItem Header="GitHub 仓库" Click="GithubClick"/>
       </MenuItem>
@@ -29,7 +30,7 @@
         <ColumnDefinition Width="200"/>
         <ColumnDefinition Width="*"/>
       </Grid.ColumnDefinitions>
-      <Border Background="{DynamicResource Panel}" BorderBrush="{DynamicResource Line}" BorderThickness="0,0,1,0">
+      <Border x:Name="NavigationPanel" Background="{DynamicResource Panel}" BorderBrush="{DynamicResource Line}" BorderThickness="0,0,1,0">
         <DockPanel Margin="18,26,18,20">
           <StackPanel DockPanel.Dock="Top" Margin="12,0,0,32">
             <TextBlock Text="COYOTE" FontFamily="Bahnschrift Condensed" FontSize="29" FontWeight="Bold" Foreground="{DynamicResource Accent}"/>
@@ -37,7 +38,7 @@
             <TextBlock Text="STUDY ROOM" Style="{StaticResource Caption}" FontFamily="Bahnschrift" FontSize="11"/>
           </StackPanel>
           <StackPanel DockPanel.Dock="Bottom" Margin="12,12,0,0">
-            <TextBlock Text="WINDOWS · v0.4.5" Style="{StaticResource Caption}" FontFamily="Bahnschrift"/>
+            <TextBlock Text="WINDOWS · v0.4.6" Style="{StaticResource Caption}" FontFamily="Bahnschrift"/>
             <TextBlock Text="独立开源项目 / DG-LAB 4" Style="{StaticResource Caption}" FontSize="11" Margin="0,6,0,0"/>
           </StackPanel>
           <StackPanel>
@@ -52,7 +53,7 @@
           </StackPanel>
         </DockPanel>
       </Border>
-      <Grid Grid.Column="1" Margin="30,24,30,20">
+      <Grid x:Name="MainContentPanel" Grid.Column="1" Margin="30,24,30,20">
         <Grid.RowDefinitions>
           <RowDefinition Height="Auto"/>
           <RowDefinition Height="*"/>
@@ -65,7 +66,7 @@
           </Grid.ColumnDefinitions>
           <StackPanel>
             <TextBlock x:Name="PageTitle" Text="专注控制台" FontSize="26" FontWeight="SemiBold"/>
-            <TextBlock x:Name="PageSubtitle" Text="把注意力留在当前这一段。" Style="{StaticResource Caption}" Margin="0,7,0,0"/>
+            <TextBlock x:Name="PageSubtitle" Text="如此怠惰懒惰，我真要好好调教你了！" Style="{StaticResource Caption}" Margin="0,7,0,0" Focusable="True" Cursor="Hand" KeyDown="MottoKeyDown" ToolTip="点击软件内任意位置换一句；此处也可按回车或空格切换"/>
           </StackPanel>
           <Border x:Name="OutputStatusPanel" Grid.Column="1" BorderBrush="{DynamicResource Line}" BorderThickness="1" CornerRadius="14" Padding="14,10" VerticalAlignment="Top" Margin="16,0,0,0" MinWidth="192" MaxWidth="250" AutomationProperties.LiveSetting="Polite">
             <StackPanel>
@@ -393,12 +394,12 @@
                   <StackPanel x:Name="SessionSettingsEditor">
                     <TextBlock Text="学习方式" Style="{StaticResource Caption}" Margin="0,0,0,7"/>
                     <ComboBox x:Name="ModeBox" SelectedIndex="0" AutomationProperties.Name="学习方式">
-                      <ComboBoxItem Content="电脑复习 · 空闲时请求确认"/>
-                      <ComboBoxItem Content="阅读 / 网课 · 定期请求确认"/>
+                      <ComboBoxItem Content="电脑复习 · 检测前台与键鼠操作"/>
+                      <ComboBoxItem Content="阅读 / 网课 · 键鼠与定期确认"/>
                       <ComboBoxItem Content="纸笔复习 · 按时确认，暂停前台判断"/>
                     </ComboBox>
-                    <TextBlock Text="电脑模式无操作时" Style="{StaticResource Caption}" Margin="0,14,0,7"/>
-                    <ComboBox x:Name="IdlePolicyBox" SelectedIndex="0" AutomationProperties.Name="电脑无操作的处理方式">
+                    <TextBlock Text="电脑 / 阅读模式无操作时" Style="{StaticResource Caption}" Margin="0,14,0,7"/>
+                    <ComboBox x:Name="IdlePolicyBox" SelectedIndex="1" AutomationProperties.Name="电脑和阅读模式无操作的处理方式">
                       <ComboBoxItem Content="请求学习确认 · 不累计分心"/>
                       <ComboBoxItem Content="超过无操作时间后按分心计时"/>
                     </ComboBox>
@@ -425,11 +426,12 @@
                         <TextBox x:Name="GraceBox" Text="10" Margin="0,7,0,0" AutomationProperties.Name="连续分心多少秒后启动反馈，1 到 300 秒"/>
                       </StackPanel>
                       <StackPanel>
-                        <TextBlock Text="无操作确认（秒）" Style="{StaticResource Caption}"/>
-                        <TextBox x:Name="IdleBox" Text="180" Margin="0,7,0,0" AutomationProperties.Name="空闲确认秒"/>
+                        <TextBlock Text="无操作触发（秒）" Style="{StaticResource Caption}"/>
+                        <TextBox x:Name="IdleBox" Text="5" Margin="0,7,0,0" AutomationProperties.Name="无操作多少秒后开始分心计时"/>
                       </StackPanel>
                     </UniformGrid>
                     <TextBlock Text="连续分心满设定秒数就启动反馈（1–300 秒，默认 10 秒）。等待期间不计入累计；累计分心只用于提高强度。" Style="{StaticResource Caption}" Margin="0,10,0,0"/>
+                    <TextBlock Text="允许内容中默认 5 秒无键鼠操作后开始分心倒计时，再满启动延迟才反馈。恢复操作即停止本次倒计时；纸笔模式只确认。" Style="{StaticResource Caption}" Margin="0,7,0,0"/>
                     <UniformGrid Columns="2" Margin="0,16,0,0">
                       <StackPanel Margin="0,0,14,0">
                         <TextBlock Text="连续专注多久后恢复（秒）" Style="{StaticResource Caption}"/>
@@ -574,8 +576,63 @@
             </StackPanel>
           </Grid>
         </ScrollViewer>
-        <Border Grid.Row="2" x:Name="NoticePanel" Background="{DynamicResource Raised}" CornerRadius="9" Padding="14,10" Margin="0,14,0,0">
-          <TextBlock x:Name="NoticeLabel" Text="先创建并选择一个专注方案，再开始专注。" FontSize="12" Foreground="{DynamicResource Muted}"/>
+        <StackPanel Grid.Row="2" Margin="0,14,0,0">
+          <Border x:Name="TutorialDock" Visibility="Collapsed" Background="{DynamicResource Panel}" BorderBrush="{DynamicResource Accent}" BorderThickness="1" CornerRadius="10" Padding="12" Margin="0,0,0,10">
+            <Grid>
+              <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+              <StackPanel Margin="0,0,12,0" VerticalAlignment="Center">
+                <TextBlock x:Name="TutorialDockTitle" FontWeight="SemiBold" FontSize="12" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap"/>
+                <TextBlock x:Name="TutorialDockStatus" Style="{StaticResource Caption}" FontSize="11" Margin="0,4,0,0" MaxHeight="36" TextTrimming="CharacterEllipsis"/>
+              </StackPanel>
+              <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                <Button Content="查看步骤" Click="TutorialExpandClick" Padding="9,6" MinHeight="32"/>
+                <Button x:Name="TutorialDockNext" Content="下一步" Click="TutorialNextClick" Style="{StaticResource Primary}" Padding="9,6" MinHeight="32" Margin="7,0,0,0"/>
+                <Button Content="暂时跳过" Click="TutorialSkipClick" Padding="9,6" MinHeight="32" Margin="7,0,0,0"/>
+              </StackPanel>
+            </Grid>
+          </Border>
+          <Border x:Name="NoticePanel" Background="{DynamicResource Raised}" CornerRadius="9" Padding="14,10">
+            <TextBlock x:Name="NoticeLabel" Text="先创建并选择一个专注方案，再开始专注。" FontSize="12" Foreground="{DynamicResource Muted}"/>
+          </Border>
+        </StackPanel>
+      </Grid>
+      <Grid x:Name="TutorialOverlay" Grid.ColumnSpan="2" Visibility="Collapsed" Background="#D9000000" Panel.ZIndex="100" SizeChanged="TutorialSizeChanged">
+        <Border x:Name="TutorialCard" Background="{DynamicResource Panel}" BorderBrush="{DynamicResource Line}" BorderThickness="1" CornerRadius="20" Padding="24" Margin="24" MaxWidth="660" Height="560" HorizontalAlignment="Stretch" VerticalAlignment="Center" KeyboardNavigation.TabNavigation="Cycle" KeyboardNavigation.ControlTabNavigation="Cycle" AutomationProperties.Name="新手教程">
+          <Grid>
+            <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+            <StackPanel>
+              <Grid>
+                <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                <StackPanel>
+                  <TextBlock Text="新手教程" FontSize="25" FontWeight="SemiBold"/>
+                  <TextBlock x:Name="TutorialCounter" Style="{StaticResource Caption}" Margin="0,5,0,0"/>
+                </StackPanel>
+                <Button Grid.Column="1" Content="暂时跳过" Click="TutorialSkipClick" VerticalAlignment="Top" Padding="12,7"/>
+              </Grid>
+              <ProgressBar x:Name="TutorialProgressBar" Height="3" Foreground="{DynamicResource Accent}" Background="{DynamicResource Raised}" BorderThickness="0" Margin="0,16,0,18" AutomationProperties.Name="教程步骤进度"/>
+            </StackPanel>
+            <ScrollViewer x:Name="TutorialBody" Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="0,0,10,0">
+              <StackPanel>
+                <TextBlock x:Name="TutorialTitle" FontSize="20" FontWeight="SemiBold" TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite"/>
+                <TextBlock x:Name="TutorialSummary" Style="{StaticResource Caption}" Margin="0,9,0,14"/>
+                <TextBlock x:Name="TutorialInstructions" FontSize="13" TextWrapping="Wrap" LineHeight="22"/>
+                <Border Background="{DynamicResource Raised}" CornerRadius="9" Padding="13" Margin="0,16,0,0">
+                  <TextBlock x:Name="TutorialTip" Style="{StaticResource Caption}" FontSize="12"/>
+                </Border>
+                <TextBlock x:Name="TutorialStatusLabel" Foreground="{DynamicResource Accent}" FontSize="12" TextWrapping="Wrap" Margin="0,14,0,0" AutomationProperties.LiveSetting="Polite"/>
+              </StackPanel>
+            </ScrollViewer>
+            <StackPanel Grid.Row="2" Margin="0,18,0,0">
+              <TextBlock x:Name="TutorialLiveStatusLabel" Visibility="Collapsed" FontSize="12" Foreground="{DynamicResource Accent}" TextWrapping="Wrap" Margin="0,0,0,10" AutomationProperties.LiveSetting="Polite"/>
+              <Button x:Name="TutorialActionButton" Content="前往设置" Click="TutorialActionClick" HorizontalAlignment="Left" Margin="0,0,0,12"/>
+              <Grid>
+                <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                <Button x:Name="TutorialEmergencyButton" Content="立即停电" Foreground="{DynamicResource Danger}" Click="TutorialEmergencyClick" HorizontalAlignment="Left" ToolTip="紧急停止输出、撤销授权并暂停会话。教程不会阻止急停"/>
+                <Button x:Name="TutorialBackButton" Grid.Column="1" Content="上一步" Click="TutorialBackClick" Margin="0,0,10,0"/>
+                <Button x:Name="TutorialNextButton" Grid.Column="2" Content="下一步" Click="TutorialNextClick" Style="{StaticResource Primary}"/>
+              </Grid>
+            </StackPanel>
+          </Grid>
         </Border>
       </Grid>
     </Grid>

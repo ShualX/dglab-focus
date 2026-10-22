@@ -31,6 +31,29 @@ async Task Until(Func<bool> condition)
 }
 try
 {
+    var firstTutorial = new TutorialProgress();
+    Assert(firstTutorial.ShowAutomatically && firstTutorial.Step == 0, "first launch offers the tutorial at its first step");
+    firstTutorial.Step = 3; firstTutorial.Dismissed = true;
+    Assert(!firstTutorial.ShowAutomatically && !firstTutorial.Completed, "skipping suppresses repeat prompts without claiming that the tutorial was completed");
+    firstTutorial.Restart();
+    Assert(firstTutorial.ShowAutomatically && firstTutorial.Step == 0 && !firstTutorial.Completed, "help can explicitly restart a skipped tutorial from the beginning");
+    firstTutorial.Finish();
+    Assert(!firstTutorial.ShowAutomatically && firstTutorial.Completed && firstTutorial.Step == TutorialGuide.Steps.Count - 1, "finishing the final step suppresses automatic replay");
+    var legacyTutorial = System.Text.Json.JsonSerializer.Deserialize<AppSettings>("{}"); legacyTutorial!.InitializePlans();
+    var damagedTutorial = System.Text.Json.JsonSerializer.Deserialize<AppSettings>("{\"Tutorial\":null}"); damagedTutorial!.InitializePlans();
+    var invalidTutorialStep = new AppSettings { Tutorial = new() { Step = int.MaxValue } }; invalidTutorialStep.InitializePlans();
+    Assert(legacyTutorial.Tutorial.ShowAutomatically && damagedTutorial.Tutorial.Step == 0 && invalidTutorialStep.Tutorial.Step == TutorialGuide.Steps.Count - 1,
+        "legacy and optional malformed tutorial metadata recover without losing application settings");
+    var oldIdle = new SessionOptions { IdleSeconds = 180, IdlePolicy = IdlePolicy.ConfirmOnly };
+    var oldIdleSettings = new AppSettings { Options = oldIdle, Plans = [new() { Options = oldIdle }], Session = new() { Options = oldIdle, State = SessionState.Suspended } };
+    oldIdleSettings.InitializePlans();
+    Assert(oldIdleSettings.Options.IdleSeconds == 5 && oldIdleSettings.Plans![0].Options.IdlePolicy == IdlePolicy.CountAsDistraction
+        && oldIdleSettings.Session!.Options.IdleSeconds == 5 && oldIdleSettings.Session.State == SessionState.Suspended,
+        "old 180-second confirmation defaults migrate to five-second counting in plans and suspended snapshots without starting a session");
+    oldIdleSettings.Options = oldIdle; oldIdleSettings.InitializePlans();
+    var customIdle = new AppSettings { Options = oldIdle with { IdleSeconds = 45 } }; customIdle.InitializePlans();
+    Assert(oldIdleSettings.Options.IdleSeconds == 180 && oldIdleSettings.Options.IdlePolicy == IdlePolicy.ConfirmOnly && customIdle.Options.IdleSeconds == 45,
+        "inactivity migration runs only once and preserves custom thresholds and later explicit confirmation-only choices");
     var previewDisplay = OutputDisplay.Create(new(), 25, default);
     Assert(previewDisplay.Value == "25%" && previewDisplay.Status.Contains("模拟") && previewDisplay.Level == 25,
         "simulation displays the curve explicitly as a percentage without claiming device output");
@@ -58,12 +81,19 @@ try
     Assert(migrated.Options.StrengthPreview.Enabled && migrated.Options.StrengthPreview.Maximum > 0 && legacy.SelectedPlanId == null,
         "legacy migration enables preview and asks for an explicit plan choice");
     var disabled = migrated.Duplicate("关闭预览") with { Options = migrated.Options with { StrengthPreview = migrated.Options.StrengthPreview with { Enabled = false } } };
-    var persistence = new AppSettings { Plans = [migrated, disabled], SelectedPlanId = disabled.Id };
+    var persistence = new AppSettings { Plans = [migrated, disabled], SelectedPlanId = disabled.Id, Tutorial = firstTutorial };
     var tempDir = Path.Combine(Path.GetTempPath(), "DglabFocus-tests-" + Guid.NewGuid().ToString("N"));
     try
     {
         new Storage(false, tempDir).Save(persistence);
         var reloaded = new Storage(false, tempDir).Load();
+        Assert(reloaded.Tutorial.Completed && !reloaded.Tutorial.ShowAutomatically && reloaded.Tutorial.Step == TutorialGuide.Steps.Count - 1,
+            "tutorial completion survives an application settings disk restart");
+        reloaded.Tutorial.Restart(); reloaded.Tutorial.Step = 2; reloaded.Tutorial.Dismissed = true;
+        new Storage(false, tempDir).Save(reloaded);
+        var skippedReload = new Storage(false, tempDir).Load();
+        Assert(skippedReload.Tutorial.Dismissed && !skippedReload.Tutorial.Completed && skippedReload.Tutorial.Step == 2 && !skippedReload.Tutorial.ShowAutomatically,
+            "dismissed tutorial progress survives disk restart and remains available for explicit replay");
         Assert(reloaded.Plans!.Count == 2 && reloaded.SelectedPlanId == disabled.Id && !reloaded.Plans[1].Options.StrengthPreview.Enabled,
             "multiple plans, selected choice and explicit preview-off survive a disk restart");
         reloaded.SelectedPlanId = Guid.NewGuid(); reloaded.InitializePlans();

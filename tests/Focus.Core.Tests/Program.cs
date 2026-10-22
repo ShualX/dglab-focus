@@ -136,11 +136,11 @@ Test("unknown and own-panel states neither accumulate nor recover", () => {
     Equal(60d, s.DebtSeconds);
 });
 Test("inactivity prompts and freezes scoring without electrical action", () => {
-    var s = New(); Advance(s, 181, Attention.Allowed, idle: 181); True(s.NeedsCheckIn); Equal(0d, s.DebtSeconds);
+    var s = New(options: new() { FocusMinutes = 0, IdleSeconds = 180, IdlePolicy = IdlePolicy.ConfirmOnly }); Advance(s, 181, Attention.Allowed, idle: 181); True(s.NeedsCheckIn); Equal(0d, s.DebtSeconds);
     s.CheckIn(origin.AddSeconds(181)); True(!s.NeedsCheckIn); Advance(s, 30, Attention.Allowed, 181, 500); True(!s.NeedsCheckIn);
 });
-Test("reading mode avoids short inactivity false positives", () => {
-    var s = New(StudyMode.Reading); Advance(s, 300, Attention.Allowed, idle: 999); True(!s.NeedsCheckIn);
+Test("reading confirmation-only mode uses its periodic check-in without inactivity output", () => {
+    var s = New(options: new() { FocusMinutes = 0, Mode = StudyMode.Reading, IdlePolicy = IdlePolicy.ConfirmOnly }); Advance(s, 300, Attention.Allowed, idle: 999); True(!s.NeedsCheckIn); Equal(0d, s.PreviewStrength);
     Advance(s, 600, Attention.Allowed, 300, 999); True(s.NeedsCheckIn);
 });
 Test("paper mode accepts no rule and only prompts for check-in", () => {
@@ -345,7 +345,7 @@ Test("new distraction grace does not reuse an earlier preview level", () => {
     Advance(s, 1, Attention.Outside, 94); True(s.PreviewStrength > 0);
 });
 Test("pause, restart, rest and check-in never retain active preview strength", () => {
-    var s = New(options: new() { FocusMinutes = 0, IdleSeconds = 180, StrengthPreview = new() { Enabled = true, Initial = 10, Maximum = 25 } });
+    var s = New(options: new() { FocusMinutes = 0, IdleSeconds = 180, IdlePolicy = IdlePolicy.ConfirmOnly, StrengthPreview = new() { Enabled = true, Initial = 10, Maximum = 25 } });
     Advance(s, 80, Attention.Outside); True(s.PreviewStrength > 0);
     Equal(0d, Session.Restore(s.Snapshot()).PreviewStrength);
     s.Suspend(origin.AddSeconds(80), "pause"); Equal(0d, s.PreviewStrength); s.Resume(origin.AddSeconds(80)); Equal(0d, s.PreviewStrength);
@@ -402,6 +402,65 @@ Test("idle counting is an explicit computer policy and still respects unknown de
     var s = New(options: new() { FocusMinutes = 0, IdleSeconds = 30, IdlePolicy = IdlePolicy.CountAsDistraction, GraceSeconds = 1 });
     Advance(s, 40, Attention.Allowed, idle: 40); True(!s.NeedsCheckIn); True(s.DebtSeconds > 0);
     var debt = s.DebtSeconds; Advance(s, 10, Attention.Unknown, 40, 100); Equal(debt, s.DebtSeconds);
+});
+Test("allowed computer and reading content starts its timer after five idle seconds and outputs at fifteen", () => {
+    foreach (var mode in new[] { StudyMode.Computer, StudyMode.Reading }) {
+        var s = New(options: new() { FocusMinutes = 0, Mode = mode, DeviceFeedback = true });
+        for (int i = 1; i <= 5; i++) s.Tick(TimeSpan.FromSeconds(1), origin.AddSeconds(i), Attention.Allowed, i);
+        True(s.StatusReason.Contains("无操作已满 5 秒")); Equal(0d, s.OutputPercent); Equal(0d, s.DebtSeconds);
+        for (int i = 6; i <= 14; i++) s.Tick(TimeSpan.FromSeconds(1), origin.AddSeconds(i), Attention.Allowed, i);
+        Equal(0d, s.OutputPercent); Equal(0, s.RecentCount(origin.AddSeconds(14)));
+        s.Tick(TimeSpan.FromSeconds(1), origin.AddSeconds(15), Attention.Allowed, 15);
+        Equal(10d, s.OutputPercent); Equal(0d, s.DebtSeconds); Equal(1, s.RecentCount(origin.AddSeconds(15)));
+        s.Tick(TimeSpan.FromSeconds(1), origin.AddSeconds(16), Attention.Allowed, 16); Equal(1d, s.DebtSeconds);
+    }
+});
+Test("input on allowed content stops inactivity output and restarts both timers without erasing debt", () => {
+    var s = New(options: new() { FocusMinutes = 0, DeviceFeedback = true });
+    for (int i = 1; i <= 20; i++) s.Tick(TimeSpan.FromSeconds(1), origin.AddSeconds(i), Attention.Allowed, i);
+    Equal(5d, s.DebtSeconds); True(s.OutputPercent > 0);
+    s.Tick(TimeSpan.FromSeconds(1), origin.AddSeconds(21), Attention.Allowed, 0); Equal(0d, s.OutputPercent); Equal(5d, s.DebtSeconds);
+    for (int i = 1; i <= 14; i++) s.Tick(TimeSpan.FromSeconds(1), origin.AddSeconds(21 + i), Attention.Allowed, i);
+    Equal(0d, s.OutputPercent); Equal(5d, s.DebtSeconds);
+    s.Tick(TimeSpan.FromSeconds(1), origin.AddSeconds(36), Attention.Allowed, 15); True(s.OutputPercent > 0);
+});
+Test("inactivity thresholds clip fractional ticks instead of charging the whole idle interval", () => {
+    var s = New(options: new() { FocusMinutes = 0, DeviceFeedback = true, IdleSeconds = 2.5, GraceSeconds = 3.5 });
+    s.Tick(TimeSpan.FromSeconds(2.25), origin.AddSeconds(2.25), Attention.Allowed, 2.25); Equal(0d, s.OutputPercent);
+    s.Tick(TimeSpan.FromSeconds(1), origin.AddSeconds(3.25), Attention.Allowed, 3.25); Equal(0d, s.OutputPercent);
+    s.Tick(TimeSpan.FromSeconds(3), origin.AddSeconds(6.25), Attention.Allowed, 6.25);
+    Equal(10d, s.OutputPercent); Equal(.25d, s.DebtSeconds);
+});
+Test("inactivity does not charge unknown or neutral observations even with an old input timestamp", () => {
+    foreach (var attention in new[] { Attention.Unknown, Attention.Neutral }) {
+        var s = New(options: new() { FocusMinutes = 0, DeviceFeedback = true });
+        Advance(s, 70, Attention.Outside); Equal(60d, s.DebtSeconds);
+        Advance(s, 100, attention, 70, 999); Equal(60d, s.DebtSeconds); Equal(0d, s.OutputPercent);
+    }
+});
+Test("resuming an inactive session never retroactively starts the output", () => {
+    var s = New(options: new() { FocusMinutes = 0, DeviceFeedback = true }); Advance(s, 20, Attention.Outside);
+    s.Suspend(origin.AddSeconds(20), "stop"); s.Resume(origin.AddSeconds(20));
+    Advance(s, 14, Attention.Allowed, 20, 999); Equal(0d, s.OutputPercent);
+    Advance(s, 1, Attention.Allowed, 34, 999); True(s.OutputPercent > 0);
+});
+Test("switching from idle allowed content to a blocked app keeps the continuous distraction timer", () => {
+    var s = New(options: new() { FocusMinutes = 0, DeviceFeedback = true });
+    for (int i = 1; i <= 14; i++) s.Tick(TimeSpan.FromSeconds(1), origin.AddSeconds(i), Attention.Allowed, i);
+    s.Tick(TimeSpan.FromSeconds(1), origin.AddSeconds(15), Attention.Outside, 0); Equal(10d, s.OutputPercent);
+});
+Test("confirm-only remains an explicit alternative and paper mode never uses inactivity for output", () => {
+    var confirm = New(options: new() { FocusMinutes = 0, DeviceFeedback = true, IdlePolicy = IdlePolicy.ConfirmOnly });
+    Advance(confirm, 30, Attention.Allowed, idle: 999); True(confirm.NeedsCheckIn); Equal(0d, confirm.OutputPercent); Equal(0d, confirm.DebtSeconds);
+    var paper = New(options: new() { FocusMinutes = 0, Mode = StudyMode.Paper, DeviceFeedback = true });
+    Advance(paper, 30, Attention.Allowed, idle: 999); Equal(0d, paper.OutputPercent); Equal(0d, paper.DebtSeconds);
+});
+Test("inactivity delay accepts five seconds and rejects invalid thresholds", () => {
+    Equal(5d, new SessionOptions().IdleSeconds); Equal(IdlePolicy.CountAsDistraction, new SessionOptions().IdlePolicy);
+    foreach (var idle in new[] { 0, .99, double.NaN, double.PositiveInfinity, 3601 }) {
+        var rejected = false; try { new SessionOptions { IdleSeconds = idle }.Validate(); } catch (ArgumentException) { rejected = true; } True(rejected);
+    }
+    new SessionOptions { IdleSeconds = 1 }.Validate(); new SessionOptions { IdleSeconds = 5 }.Validate();
 });
 Test("real output remains opt-in and uses the same eligible curve", () => {
     var simulation = New(); Advance(simulation, 80, Attention.Outside); True(simulation.PreviewStrength > 0); Equal(0d, simulation.OutputPercent);

@@ -34,6 +34,7 @@ public partial class MainWindow
         OutputDetailLabel.Text = display.Detail;
         System.Windows.Automation.AutomationProperties.SetName(OutputStatusPanel, $"{display.Status}，{display.Detail}：{display.Value}");
         floating?.UpdateFeedback(display);
+        RefreshTutorialStatus();
         var active = output.Authorized && output.Requested > 0;
         if (active && !outputWasActive) Pulse(OutputStatusPanel);
         outputWasActive = active;

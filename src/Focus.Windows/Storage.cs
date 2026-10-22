@@ -12,12 +12,17 @@ public sealed class AppSettings
     public Guid? SelectedPlanId { get; set; }
     public bool Sound { get; set; }
     public bool ReducedMotion { get; set; }
+    public TutorialProgress Tutorial { get; set; } = new();
+    public int? LastMottoIndex { get; set; }
+    public int InactivityRuleVersion { get; set; }
     public string BridgeToken { get; set; } = Convert.ToHexString(RandomNumberGenerator.GetBytes(24));
     public SessionSnapshot? Session { get; set; }
     public List<SessionEvent> History { get; set; } = [];
 
     public void InitializePlans(bool migrateLegacy = false)
     {
+        Tutorial ??= new();
+        Tutorial.Normalize();
         if (Options == null || Rules == null || Rules.Any(x => x == null) || History == null
             || BridgeToken == null || BridgeToken.Length != 48 || !BridgeToken.All(Uri.IsHexDigit))
             throw new ArgumentException("本机配置不完整。");
@@ -36,6 +41,16 @@ public sealed class AppSettings
                 if (Session != null && Session.PlanId == null)
                     Session = Session with { PlanId = legacy.Id, PlanName = legacy.Name };
             }
+        }
+        if (InactivityRuleVersion < 1)
+        {
+            static SessionOptions UpgradeIdle(SessionOptions options) => options.IdleSeconds == 180 && options.IdlePolicy == IdlePolicy.ConfirmOnly
+                ? options with { IdleSeconds = 5, IdlePolicy = IdlePolicy.CountAsDistraction } : options;
+            Options = UpgradeIdle(Options);
+            for (int i = 0; i < Plans.Count; i++)
+                if (Plans[i]?.Options != null) Plans[i] = Plans[i] with { Options = UpgradeIdle(Plans[i].Options) };
+            if (Session?.Options != null) Session = Session with { Options = UpgradeIdle(Session.Options) };
+            InactivityRuleVersion = 1;
         }
         foreach (var plan in Plans) { if (plan == null) throw new ArgumentException("方案数据不完整。"); plan.Validate(); }
         if (Plans.Select(x => x.Id).Distinct().Count() != Plans.Count)
