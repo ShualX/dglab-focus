@@ -71,6 +71,7 @@ public partial class MainWindow : Window
         PlanNameBox.Text = selected?.Name ?? "";
         HistoryList.ItemsSource = history;
         LoadOptions();
+        RefreshLanAddresses();
         SoundBox.IsChecked = settings.Sound;
         ReducedMotionBox.IsChecked = settings.ReducedMotion;
         initializing = false;
@@ -81,7 +82,7 @@ public partial class MainWindow : Window
         device.Updated += (message, url) => Dispatcher.InvokeAsync(() =>
         {
             DeviceStatusLabel.Text = message;
-            if (url == "") { pairingUrl = null; PairingQr.Source = null; PairingQr.Visibility = Visibility.Collapsed; }
+            if (url == "") ClearPairing();
             else if (url != null)
             {
                 pairingUrl = url;
@@ -92,8 +93,10 @@ public partial class MainWindow : Window
                 var image = new BitmapImage();
                 image.BeginInit(); image.CacheOption = BitmapCacheOption.OnLoad; image.StreamSource = stream; image.EndInit(); image.Freeze();
                 PairingQr.Source = image;
-                PairingQr.Visibility = Visibility.Visible;
+                PairingAddressBox.Text = device.PairingSocketUrl ?? "";
+                PairingPanel.Visibility = Visibility.Visible;
             }
+            RefreshConnectionControls();
         });
         device.DevicesChanged += () => Dispatcher.InvokeAsync(RefreshDeviceList);
         device.Faulted += reason => Dispatcher.InvokeAsync(() =>
@@ -495,15 +498,39 @@ public partial class MainWindow : Window
     }
     private async void DeviceConnectClick(object sender, RoutedEventArgs e)
     {
+        if (connectingDevice) return;
         if (session.IsActive && session.Options.DeviceFeedback) SuspendForFault("重新配对设备，专注会话已暂停。");
-        PairingQr.Source = null; PairingQr.Visibility = Visibility.Collapsed;
-        DeviceConnectButton.IsEnabled = false; DeviceStatusLabel.Text = "正在连接官方中继…";
-        try { await device.Connect(); } finally { DeviceConnectButton.IsEnabled = true; }
+        var local = ConnectionModeBox.SelectedIndex == 0;
+        var network = LanAddressBox.SelectedItem as LanAddress;
+        if (local && network == null) { Notice("未找到局域网 IPv4 地址，请联网后刷新网卡，或选择官方公网中继。"); return; }
+        connectingDevice = true; ClearPairing(); RefreshConnectionControls();
+        try
+        {
+            await device.DisconnectAsync(); await StopLocalRelay();
+            DeviceStatusLabel.Text = local ? "正在启动局域网服务…" : "正在连接官方中继…";
+            if (local)
+            {
+                localRelay = new LocalDglabRelay();
+                await localRelay.StartAsync(network!.Address, smoke ? 0 : LocalDglabRelay.Port);
+                await device.Connect(localRelay.Address);
+                if (!device.IsConnected) await StopLocalRelay();
+            }
+            else await device.Connect();
+        }
+        catch (Exception ex) when (ex is IOException or System.Net.Sockets.SocketException or InvalidOperationException or OperationCanceledException)
+        {
+            await StopLocalRelay();
+            DeviceStatusLabel.Text = "局域网服务启动失败：地址已变化或端口 17841 被占用。请刷新网卡后重试。";
+        }
+        finally { connectingDevice = false; RefreshConnectionControls(); }
     }
     private async void DeviceDisconnectClick(object sender, RoutedEventArgs e)
     {
         if (session.IsActive && session.Options.DeviceFeedback) SuspendForFault("设备已断开，专注会话暂停。");
-        await device.DisconnectAsync(); pairingUrl = null; PairingQr.Source = null; PairingQr.Visibility = Visibility.Collapsed;
+        if (connectingDevice) return;
+        connectingDevice = true; RefreshConnectionControls();
+        try { await device.DisconnectAsync(); await StopLocalRelay(); ClearPairing(); }
+        finally { connectingDevice = false; RefreshConnectionControls(); }
         DeviceStatusLabel.Text = "已断开连接"; Refresh();
     }
     private void WindowClosing(object? sender, CancelEventArgs e)
@@ -523,6 +550,7 @@ public partial class MainWindow : Window
         if (closing) return;
         closing = true; timer.Stop(); Save();
         await device.DisconnectAsync();
+        await StopLocalRelay();
         bridge.Dispose(); floating?.Close(); tray?.Dispose();
         NativeMonitor.UnregisterHotKey(new WindowInteropHelper(this).Handle, 1);
         SystemEvents.SessionSwitch -= SessionSwitch; SystemEvents.PowerModeChanged -= PowerChanged;
@@ -588,7 +616,7 @@ public partial class MainWindow : Window
             DeviceFeedbackBox.IsChecked = true; SaveSettingsClick(this, new RoutedEventArgs());
             StartClick(this, new RoutedEventArgs());
             if (session.IsActive || page != "DevicePage") throw new InvalidOperationException("未授权设备的真实方案仍可启动。");
-            PageScroll.ScrollToBottom();
+            PageScroll.ScrollToTop();
             await Dispatcher.InvokeAsync(() => { UpdateLayout(); Capture(folder, "DeviceSetup"); }, DispatcherPriority.ApplicationIdle);
             DeviceFeedbackBox.IsChecked = false; SaveSettingsClick(this, new RoutedEventArgs());
             StartClick(this, new RoutedEventArgs());
@@ -631,6 +659,25 @@ public partial class MainWindow : Window
             await Dispatcher.InvokeAsync(() => { UpdateLayout(); Capture(folder, "Compact"); }, DispatcherPriority.ApplicationIdle);
             ShowPage("PlansPage"); ShowPlanTab("RulesEditor");
             await Dispatcher.InvokeAsync(() => { UpdateLayout(); Capture(folder, "PlansCompact"); }, DispatcherPriority.ApplicationIdle);
+            Width = 1180; Height = 830; ShowPage("DevicePage");
+            ConnectionModeBox.SelectedIndex = 0;
+            var loopback = new LanAddress("本机协议测试", System.Net.IPAddress.Loopback, true);
+            LanAddressBox.ItemsSource = new[] { loopback }; LanAddressBox.SelectedIndex = 0;
+            DeviceConnectClick(this, new RoutedEventArgs());
+            var pairingUntil = Environment.TickCount64 + 4500;
+            while ((connectingDevice || pairingUrl == null) && Environment.TickCount64 < pairingUntil) await Task.Delay(20);
+            if (pairingUrl == null || PairingPanel.Visibility != Visibility.Visible || !PairingAddressBox.Text.StartsWith("ws://127.0.0.1:") ||
+                ConnectionModeBox.IsEnabled || LanAddressBox.IsEnabled || device.IsArmed)
+                throw new InvalidOperationException("局域网配对界面未显示可用地址或未锁定连接设置。");
+            await Dispatcher.InvokeAsync(() => { UpdateLayout(); Capture(folder, "DevicePairingLocalTest"); }, DispatcherPriority.ApplicationIdle);
+            Width = 920; Height = 680;
+            PageScroll.ScrollToVerticalOffset(180);
+            await Dispatcher.InvokeAsync(() => { UpdateLayout(); Capture(folder, "DevicePairingCompact"); }, DispatcherPriority.ApplicationIdle);
+            DeviceDisconnectClick(this, new RoutedEventArgs());
+            while (connectingDevice) await Task.Delay(20);
+            if (PairingPanel.Visibility != Visibility.Collapsed || PairingAddressBox.Text.Length != 0 || !ConnectionModeBox.IsEnabled)
+                throw new InvalidOperationException("局域网断开后没有清理地址并解锁设置。");
+            RefreshLanAddresses();
             if (Array.IndexOf(args, "--device-test-relay") >= 0)
             {
                 for (int i = 0; i < 301; i++) session.Tick(TimeSpan.FromSeconds(1), DateTimeOffset.Now, Attention.Allowed, 0);
@@ -650,7 +697,7 @@ public partial class MainWindow : Window
                 until = Environment.TickCount64 + 2500;
                 while (device.RequestedIntensity == 0 && Environment.TickCount64 < until) await Task.Delay(20);
                 if (device.RequestedIntensity is <= 0 or > 20) throw new InvalidOperationException("方案分心没有产生受上限约束的真实协议指令。");
-                Width = 1180; Height = 830; ShowPage("DevicePage"); PageScroll.ScrollToBottom(); Refresh();
+                Width = 1180; Height = 830; ShowPage("DevicePage"); Refresh();
                 await Dispatcher.InvokeAsync(() => { UpdateLayout(); Capture(folder, "DeviceArmedLocalTest"); }, DispatcherPriority.ApplicationIdle);
                 EmergencyClick(this, new RoutedEventArgs());
                 if (device.IsArmed || session.State != SessionState.Suspended) throw new InvalidOperationException("急停未撤销授权或暂停会话。");
@@ -659,6 +706,7 @@ public partial class MainWindow : Window
                 await Dispatcher.InvokeAsync(() => { UpdateLayout(); Capture(folder, "DeviceStoppedLocalTest"); }, DispatcherPriority.ApplicationIdle);
             }
             File.WriteAllText(Path.Combine(folder, "smoke-result.txt"), $"PASS: empty plan library, required selection, create/copy/rename/delete/undo, isolated plan rules and timing, invalid edits block switching, active plan locked.\n5 pages, plan tabs, default strength curve, validation, active simulation, exit, floating and compact layouts rendered.\nUnknown state cleared preview. No physical devices or user settings used.\nRuntime: {RuntimeInformation.FrameworkDescription}\n");
+            File.AppendAllText(Path.Combine(folder, "smoke-result.txt"), "PASS: built-in relay on loopback only: UI generates a QR and manual server address, locks network choices, disconnects and clears credentials. Wide and compact layouts rendered.\n");
             if (Array.IndexOf(args, "--device-test-relay") >= 0)
                 File.AppendAllText(Path.Combine(folder, "smoke-result.txt"), "PASS: local fake App only: UI authorization → selected plan → distraction → bounded V4 requests → emergency stop. No physical device connected.\n");
         }

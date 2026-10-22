@@ -6,6 +6,8 @@
 
 支持范围为 DG-LAB 4 App + `COYOTE_030`。操作同时指定 App 的 `clientId` 和主机的 `slotId`，通道使用 0 / 1。控制器匹配来源和请求 ID，并使用 App 的通道上限限制授权。未复用官方 GPL SDK 的实现代码或内置波形资源，均匀帧按公开线协议独立构造。
 
+v0.4.1 按 [官方 V4 中继消息说明](https://github.com/dungeonlab-open/dglab-websocket-server/blob/main/README_CN.md#v4-协议)独立实现内置局域网中继。控制端获得随机 ID，手机通过 `tid` 加入；中继定向转发 `data`，为手机上报附加可信来源 ID，并通知断连。二维码外层保持官方 `https://dungeon-lab.cn/s/?v=1&action=socket&url=...` 格式，内部换成所选电脑地址。没有复用官方中继源代码。
+
 | 相关项目 | 核对内容 | 与本项目的关系 |
 | --- | --- | --- |
 | [CodeShock](https://github.com/Laceprndpm/CodeShock) | README 与项目目录 | 算法题评测事件联动，含模拟模式，检测目标不同 |

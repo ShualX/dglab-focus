@@ -37,7 +37,7 @@
             <TextBlock Text="STUDY ROOM" Style="{StaticResource Caption}" FontFamily="Bahnschrift" FontSize="11"/>
           </StackPanel>
           <StackPanel DockPanel.Dock="Bottom" Margin="12,12,0,0">
-            <TextBlock Text="WINDOWS · v0.4.0" Style="{StaticResource Caption}" FontFamily="Bahnschrift"/>
+            <TextBlock Text="WINDOWS · v0.4.1" Style="{StaticResource Caption}" FontFamily="Bahnschrift"/>
             <TextBlock Text="独立开源项目 / DG-LAB 4" Style="{StaticResource Caption}" FontSize="11" Margin="0,6,0,0"/>
           </StackPanel>
           <StackPanel>
@@ -417,32 +417,36 @@
               </Border>
             </StackPanel>
             <StackPanel x:Name="DevicePage" Visibility="Collapsed">
-              <Border Style="{StaticResource Card}" Margin="0,0,0,16">
-                <StackPanel>
-                  <TextBlock Text="Chrome / Edge 连接" Style="{StaticResource SectionTitle}"/>
-                  <TextBlock x:Name="BridgeLabel" Text="等待扩展连接"/>
-                  <TextBlock Text="在浏览器的扩展管理页开启开发者模式，加载下载包中的 extension 文件夹。在扩展弹窗中粘贴本机配对码。" Style="{StaticResource Caption}" Margin="0,10,0,16"/>
-                  <Button Content="复制本机配对码" Click="CopyTokenClick" HorizontalAlignment="Left"/>
-                  <WrapPanel Margin="0,12,0,0">
-                    <Button Content="打开扩展文件夹" Click="OpenExtensionFolderClick" Margin="0,0,10,8"/>
-                    <Button Content="复制扩展路径" Click="CopyExtensionPathClick" Margin="0,0,10,8"/>
-                    <Button Content="Chrome 扩展设置" Tag="chrome" Click="OpenBrowserSetupClick" Margin="0,0,10,8"/>
-                    <Button Content="Edge 扩展设置" Tag="msedge" Click="OpenBrowserSetupClick" Margin="0,0,0,8"/>
-                  </WrapPanel>
-                  <TextBlock Text="扩展只向 127.0.0.1 发送当前窗口的活动页地址，不采集页面正文、密码或键入内容。完整地址仅在内存匹配，记录不保存浏览历史。" Style="{StaticResource Caption}" Margin="0,14,0,0"/>
-                </StackPanel>
-              </Border>
               <Border Style="{StaticResource Card}">
                 <StackPanel>
                   <TextBlock Text="DG-LAB 4 App · 郊狼 3" Style="{StaticResource SectionTitle}"/>
-                  <TextBlock Text="先在手机 App 连接主机并开放 Socket 控制，再扫码配对。本软件只控制你选定的一个通道。暂停、断连或重启后需重新授权。" Style="{StaticResource Caption}" Margin="0,0,0,14"/>
+                  <TextBlock Text="先完成手机 App 配对，再选择 App 中开放控制的主机。本软件只控制你选定的一个通道。暂停、断连或重启后需重新授权。" Style="{StaticResource Caption}" Margin="0,0,0,14"/>
+                  <TextBlock Text="连接方式" Style="{StaticResource Caption}" Margin="0,0,0,7"/>
+                  <ComboBox x:Name="ConnectionModeBox" SelectedIndex="0" SelectionChanged="ConnectionModeChanged" AutomationProperties.Name="设备连接方式">
+                    <ComboBoxItem Content="局域网直连 · 推荐"/><ComboBoxItem Content="官方公网中继"/>
+                  </ComboBox>
+                  <Grid x:Name="LanAddressPanel" Margin="0,12,0,0">
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                    <ComboBox x:Name="LanAddressBox" DisplayMemberPath="Display" AutomationProperties.Name="手机可访问的电脑网卡地址"/>
+                    <Button x:Name="RefreshLanButton" Grid.Column="1" Content="刷新网卡" Click="RefreshLanClick" Margin="12,0,0,0"/>
+                  </Grid>
+                  <TextBlock x:Name="ConnectionHelpLabel" Text="手机与电脑需在同一路由器网络。选择实际联网的网卡；若 Windows 询问防火墙权限，请允许专用网络。" Style="{StaticResource Caption}" Margin="0,12,0,12"/>
                   <TextBlock x:Name="DeviceStatusLabel" Text="未连接 · 可先使用模拟模式" Style="{StaticResource Caption}"/>
-                  <StackPanel Orientation="Horizontal" Margin="0,16,0,0">
-                    <Button x:Name="DeviceConnectButton" Content="生成配对二维码" Click="DeviceConnectClick"/>
-                    <Button Content="断开连接" Click="DeviceDisconnectClick" Margin="12,0,0,0"/>
-                    <Button Content="刷新设备" Click="RefreshDevicesClick" Margin="12,0,0,0"/>
+                  <WrapPanel Margin="0,16,0,0">
+                    <Button x:Name="DeviceConnectButton" Content="生成配对二维码" Click="DeviceConnectClick" Margin="0,0,12,8"/>
+                    <Button x:Name="DeviceDisconnectButton" Content="断开连接" Click="DeviceDisconnectClick" Margin="0,0,12,8"/>
+                    <Button Content="刷新设备" Click="RefreshDevicesClick" Margin="0,0,0,8"/>
+                  </WrapPanel>
+                  <Grid x:Name="PairingPanel" Visibility="Collapsed" Margin="0,20,0,0">
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="220"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                    <Image x:Name="PairingQr" Width="220" Height="220" Stretch="Uniform" VerticalAlignment="Top" AutomationProperties.Name="DG-LAB App 配对二维码"/>
+                  <StackPanel x:Name="PairingAddressPanel" Grid.Column="1" Margin="24,0,0,0">
+                    <TextBlock Text="扫码失败时，在 App 中手动输入服务器地址" Style="{StaticResource Caption}"/>
+                    <TextBox x:Name="PairingAddressBox" IsReadOnly="True" TextWrapping="Wrap" Margin="0,7,0,10" AutomationProperties.Name="DG-LAB 服务器地址"/>
+                    <Button Content="复制服务器地址" Click="CopyPairingAddressClick" HorizontalAlignment="Left"/>
+                    <TextBlock Text="地址含本次配对凭证，请勿公开。重新生成二维码后，旧地址失效。" Style="{StaticResource Caption}" Margin="0,10,0,0"/>
                   </StackPanel>
-                  <Image x:Name="PairingQr" Width="220" Height="220" Stretch="Uniform" HorizontalAlignment="Left" Margin="0,20,0,0" Visibility="Collapsed" AutomationProperties.Name="DG-LAB App 配对二维码"/>
+                  </Grid>
                   <TextBlock Text="控制设备" Style="{StaticResource Caption}" Margin="0,20,0,7"/>
                   <ComboBox x:Name="DevicePicker" DisplayMemberPath="Display" SelectionChanged="DeviceChoiceChanged" AutomationProperties.Name="选择 DG-LAB 主机"/>
                   <UniformGrid Columns="2" Margin="0,14,0,0">
@@ -464,7 +468,22 @@
                   </WrapPanel>
                   <TextBlock x:Name="DeviceOutputLabel" Text="设备未授权。方案默认使用模拟模式。" Foreground="{DynamicResource Accent}"/>
                   <TextBlock Text="真实输出使用 1 秒短任务。软件不续发时，App 中的临时强度会随任务结束归零。立即停止独立于普通退出的 5 分钟等待。设备尚未到货，协议联调不等于实机验证。" Style="{StaticResource Caption}" Margin="0,12,0,0"/>
-                  <TextBlock Text="设备连接通过官方 WebSocket 中继交换配对、设备状态与控制指令。专注记录与网页地址不发送到中继。" Style="{StaticResource Caption}" Margin="0,16,0,0"/>
+                  <TextBlock Text="局域网模式仅监听所选网卡的 17841 端口。公网模式使用官方中继。配对连接仅交换设备状态与控制指令。" Style="{StaticResource Caption}" Margin="0,16,0,0"/>
+                </StackPanel>
+              </Border>
+              <Border Style="{StaticResource Card}" Margin="0,16,0,0">
+                <StackPanel>
+                  <TextBlock Text="Chrome / Edge 连接" Style="{StaticResource SectionTitle}"/>
+                  <TextBlock x:Name="BridgeLabel" Text="等待扩展连接"/>
+                  <TextBlock Text="在浏览器的扩展管理页开启开发者模式，加载下载包中的 extension 文件夹。在扩展弹窗中粘贴本机配对码。" Style="{StaticResource Caption}" Margin="0,10,0,16"/>
+                  <Button Content="复制本机配对码" Click="CopyTokenClick" HorizontalAlignment="Left"/>
+                  <WrapPanel Margin="0,12,0,0">
+                    <Button Content="打开扩展文件夹" Click="OpenExtensionFolderClick" Margin="0,0,10,8"/>
+                    <Button Content="复制扩展路径" Click="CopyExtensionPathClick" Margin="0,0,10,8"/>
+                    <Button Content="Chrome 扩展设置" Tag="chrome" Click="OpenBrowserSetupClick" Margin="0,0,10,8"/>
+                    <Button Content="Edge 扩展设置" Tag="msedge" Click="OpenBrowserSetupClick" Margin="0,0,0,8"/>
+                  </WrapPanel>
+                  <TextBlock Text="扩展只向 127.0.0.1 发送当前窗口的活动页地址，不采集页面正文、密码或键入内容。完整地址仅在内存匹配，记录不保存浏览历史。" Style="{StaticResource Caption}" Margin="0,14,0,0"/>
                 </StackPanel>
               </Border>
             </StackPanel>

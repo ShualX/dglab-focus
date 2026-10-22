@@ -11,7 +11,8 @@ namespace DglabFocus.Windows;
 public sealed class DglabController : IDisposable
 {
     public const string RelayUrl = "wss://trex.dungeon-lab.cn/v4";
-    private readonly Uri relay;
+    private readonly Uri defaultRelay;
+    private Uri relay;
     private readonly object sync = new();
     private readonly SemaphoreSlim sendGate = new(1), outputGate = new(1);
     private readonly SemaphoreSlim armGate = new(1);
@@ -31,20 +32,28 @@ public sealed class DglabController : IDisposable
     public bool IsConnected => socket?.State == WebSocketState.Open;
     public int RequestedIntensity => Volatile.Read(ref intensity);
     public string Status { get; private set; } = "未连接";
+    public string? PairingSocketUrl { get; private set; }
     public event Action<string, string?>? Updated;
     public event Action? DevicesChanged;
     public event Action<string>? Faulted;
     public IReadOnlyList<DglabDevice> Devices { get { lock (sync) return devices.Values.OrderBy(x => x.Name).ToList(); } }
 
-    public DglabController(Uri? relayUri = null) => relay = relayUri ?? new Uri(RelayUrl);
-    private void Report(string text, string? url = null) { Status = text; Updated?.Invoke(text, url); }
+    public DglabController(Uri? relayUri = null) => defaultRelay = relay = relayUri ?? new Uri(RelayUrl);
+    private void Report(string text, string? url = null)
+    { if (url == "") PairingSocketUrl = null; Status = text; Updated?.Invoke(text, url); }
     private DglabDevice? Selected { get { lock (sync) return selectedKey != null ? devices.GetValueOrDefault(selectedKey) : null; } }
 
-    public async Task Connect()
+    public async Task Connect(Uri? endpoint = null)
     {
         await DisconnectAsync().ConfigureAwait(false);
+        relay = endpoint ?? defaultRelay;
+        if (relay.Scheme is not ("ws" or "wss")) throw new ArgumentException("中继地址必须使用 ws 或 wss。");
         var cts = new CancellationTokenSource();
         var ws = new ClientWebSocket();
+        // LAN traffic must not be routed through the computer's HTTP proxy.
+        if (System.Net.IPAddress.TryParse(relay.Host, out var address) &&
+            (System.Net.IPAddress.IsLoopback(address) || LanAddress.IsPrivate(address))) ws.Options.Proxy = null;
+        ws.Options.CollectHttpResponseDetails = true;
         lifetime = cts; socket = ws;
         try
         {
@@ -56,12 +65,18 @@ public sealed class DglabController : IDisposable
             probe = Task.Run(() => ProbeLoopAsync(cts.Token));
         }
         catch (Exception e) when (e is WebSocketException or OperationCanceledException or IOException or ObjectDisposedException)
-        { Report("中继连接失败，请检查网络后重试。", ""); Dispose(); }
+        {
+            var code = (int)ws.HttpStatusCode;
+            var reason = code >= 400 ? $"HTTP {code}" : e is OperationCanceledException ? "连接超时" : "网络握手失败";
+            Dispose();
+            Report($"中继连接失败（{reason}）。" + (relay.Scheme == "wss" ? "可切换到局域网直连。" : "请刷新网卡地址后重新生成二维码。"), "");
+        }
     }
 
     private async Task ListenAsync(ClientWebSocket ws, CancellationToken ct)
     {
         var bytes = new byte[262144];
+        string? failure = null;
         try
         {
             while (!ct.IsCancellationRequested && ws.State == WebSocketState.Open)
@@ -78,7 +93,7 @@ public sealed class DglabController : IDisposable
             }
         }
         catch (Exception e) when (e is WebSocketException or OperationCanceledException or IOException or JsonException or InvalidOperationException or ArgumentException)
-        { if (!ct.IsCancellationRequested) Report("设备连接异常：" + e.Message, ""); }
+        { if (!ct.IsCancellationRequested) failure = e is InvalidDataException ? e.Message : "设备连接异常，请重新生成二维码。"; }
         finally
         {
             if (ReferenceEquals(socket, ws) && !ct.IsCancellationRequested)
@@ -87,7 +102,7 @@ public sealed class DglabController : IDisposable
                 lifetime?.Cancel();
                 foreach (var item in pending.Values) item.Completion.TrySetCanceled();
                 lock (sync) { devices.Clear(); clients.Clear(); }
-                DevicesChanged?.Invoke(); Report("设备连接已断开，需要重新连接并授权。", "");
+                DevicesChanged?.Invoke(); Report(failure ?? "设备连接已断开或二维码已过期，请重新生成并授权。", "");
                 Faulted?.Invoke("设备连接已断开，已暂停真实输出。");
             }
         }
@@ -99,8 +114,9 @@ public sealed class DglabController : IDisposable
         var client = DglabDevice.Text(frame, "clientId");
         if (type == "hello" && !string.IsNullOrWhiteSpace(client))
         {
-            var url = new UriBuilder(relay) { Query = "tid=" + Uri.EscapeDataString(client) }.Uri.ToString();
-            Report("等待 DG-LAB 4 App 扫码连接。", "https://dungeon-lab.cn/s/?v=1&action=socket&url=" + Uri.EscapeDataString(url));
+            var url = DglabPairing.SocketUri(relay, client);
+            PairingSocketUrl = url.AbsoluteUri;
+            Report("等待 DG-LAB 4 App 扫码；也可复制服务器地址手动连接。二维码 5 分钟内有效。", DglabPairing.QrUrl(url));
         }
         else if (type == "client_attached" && !string.IsNullOrWhiteSpace(client))
         {
@@ -352,6 +368,7 @@ public sealed class DglabController : IDisposable
     {
         lock (sync) { epoch++; armed = false; }
         Volatile.Write(ref desired, 0); Volatile.Write(ref intensity, 0);
+        PairingSocketUrl = null;
         lifetime?.Cancel(); socket?.Dispose(); socket = null;
         foreach (var item in pending.Values) item.Completion.TrySetCanceled();
         lock (sync) { clients.Clear(); devices.Clear(); }

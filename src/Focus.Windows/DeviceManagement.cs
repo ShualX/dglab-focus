@@ -9,6 +9,48 @@ namespace DglabFocus.Windows;
 
 public partial class MainWindow
 {
+    private LocalDglabRelay? localRelay;
+    private bool connectingDevice;
+    private void ClearPairing()
+    {
+        pairingUrl = null; PairingQr.Source = null; PairingPanel.Visibility = Visibility.Collapsed;
+        PairingAddressBox.Clear();
+    }
+    private async Task StopLocalRelay()
+    { if (localRelay is { } relay) { localRelay = null; await relay.DisposeAsync(); } }
+    private void RefreshLanAddresses()
+    {
+        var old = (LanAddressBox.SelectedItem as LanAddress)?.Address;
+        try
+        {
+            var addresses = LanAddress.Find(); LanAddressBox.ItemsSource = addresses;
+            LanAddressBox.SelectedItem = addresses.FirstOrDefault(x => x.Address.Equals(old)) ?? addresses.FirstOrDefault();
+        }
+        catch (System.Net.NetworkInformation.NetworkInformationException) { LanAddressBox.ItemsSource = Array.Empty<LanAddress>(); }
+    }
+    private void RefreshConnectionControls()
+    {
+        if (ConnectionModeBox == null || LanAddressBox == null || DeviceDisconnectButton == null) return;
+        var editable = !connectingDevice && !device.IsConnected;
+        ConnectionModeBox.IsEnabled = LanAddressBox.IsEnabled = RefreshLanButton.IsEnabled = editable;
+        DeviceConnectButton.IsEnabled = DeviceDisconnectButton.IsEnabled = !connectingDevice;
+    }
+    private void ConnectionModeChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (initializing || LanAddressPanel == null || ConnectionHelpLabel == null) return;
+        var local = ConnectionModeBox.SelectedIndex == 0;
+        LanAddressPanel.Visibility = local ? Visibility.Visible : Visibility.Collapsed;
+        ConnectionHelpLabel.Text = local
+            ? "手机与电脑需在同一路由器网络。选择实际联网的网卡；若 Windows 询问防火墙权限，请允许专用网络。VPN 需允许局域网访问。"
+            : "手机与电脑均需能连接 trex.dungeon-lab.cn。官方演示中继不可用时，请断开并切换到局域网直连。";
+    }
+    private void RefreshLanClick(object sender, RoutedEventArgs e) => RefreshLanAddresses();
+    private void CopyPairingAddressClick(object sender, RoutedEventArgs e)
+    {
+        if (device.PairingSocketUrl is not { } address || !device.IsConnected) { ClearPairing(); return; }
+        try { Clipboard.SetText(address); Notice("服务器地址已复制。在 DG-LAB App 的服务器地址输入框中粘贴即可。"); }
+        catch (System.Runtime.InteropServices.COMException) { Notice("剪贴板正被占用，请稍后重试。"); }
+    }
     private bool refreshingDevices, armingDevice;
     private void RefreshDeviceList()
     {
@@ -27,6 +69,7 @@ public partial class MainWindow
     }
     private void RefreshDeviceControls()
     {
+        RefreshConnectionControls();
         if (DevicePicker == null || ArmDeviceButton == null || DeviceCapBox == null || DeviceInfoLabel == null) return;
         var selected = DevicePicker.SelectedItem as DglabDevice;
         var current = device.Devices.FirstOrDefault(x => x.Key == selected?.Key);

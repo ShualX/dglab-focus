@@ -31,6 +31,7 @@ async Task Until(Func<bool> condition)
 }
 try
 {
+    await LocalRelayIntegration.Run(Assert);
     await DglabIntegration.Run(Assert);
     var fresh = new AppSettings(); fresh.InitializePlans();
     Assert(fresh.Plans!.Count == 0 && fresh.SelectedPlanId == null, "fresh installation has no implicitly chosen plan");
