@@ -8,9 +8,11 @@ document.querySelector('#pair').addEventListener('submit', async event => {
   event.preventDefault();
   const token = input.value.trim();
   if (!/^[A-Fa-f0-9]{48}$/.test(token)) { status.textContent = '配对码应为 48 位。请从软件重新复制。'; return; }
-  await chrome.storage.local.set({ token });
+  await chrome.storage.local.set({ token, pairingSource: 'manual' });
   input.value = '';
   status.textContent = '配对码已保存，正在连接…';
+  try { await chrome.runtime.sendMessage({ type: 'reconnect' }); }
+  catch { status.textContent = '配对码已保存，请重新加载扩展后连接。'; }
 });
 chrome.storage.onChanged.addListener((changes, area) => { if (area === 'session' && changes.status) void refresh(); });
 void refresh();

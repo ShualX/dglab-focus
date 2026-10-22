@@ -1,4 +1,6 @@
 import { browserName, makeReport } from './report.js';
+import { installationToken } from './install-config.js';
+import { readPairingToken } from './pairing.js';
 
 let socket;
 let timer;
@@ -27,8 +29,8 @@ async function connect() {
   if (connecting || socket?.readyState === WebSocket.OPEN || socket?.readyState === WebSocket.CONNECTING) return;
   connecting = true;
   try {
-    const { token } = await chrome.storage.local.get('token');
-    if (typeof token !== 'string' || !/^[A-Fa-f0-9]{48}$/.test(token)) {
+    const token = await readPairingToken(chrome.storage.local, installationToken);
+    if (!token) {
       await status('请先粘贴 Windows 软件的本机配对码');
       return;
     }
@@ -67,6 +69,13 @@ chrome.storage.onChanged.addListener((changes, area) => {
   clearInterval(timer); clearTimeout(retry);
   const previous = socket; socket = undefined; previous?.close();
   void connect();
+});
+chrome.runtime.onMessage.addListener((message, sender, respond) => {
+  if (sender.id !== chrome.runtime.id || message?.type !== 'reconnect') return;
+  paired = false;
+  clearInterval(timer); clearTimeout(retry);
+  const previous = socket; socket = undefined; previous?.close();
+  void connect(); respond({ ok: true });
 });
 chrome.alarms.onAlarm.addListener(alarm => { if (alarm.name === 'reconnect') void connect(); });
 chrome.runtime.onStartup.addListener(() => { void connect(); });

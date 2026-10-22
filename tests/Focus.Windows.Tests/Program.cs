@@ -31,6 +31,7 @@ async Task Until(Func<bool> condition)
 }
 try
 {
+    BrowserSetupChecks.Run(Assert);
     await LocalRelayIntegration.Run(Assert);
     await DglabIntegration.Run(Assert);
     var fresh = new AppSettings(); fresh.InitializePlans();
@@ -83,6 +84,8 @@ try
     await Until(() => bridge.Get("Chrome", DateTimeOffset.UtcNow) != null);
     Assert(bridge.Get("Chrome", DateTimeOffset.UtcNow)?.Url.EndsWith("id=2") == true, "receives current URL for in-memory rule matching");
     Assert(bridge.Get("Edge", DateTimeOffset.UtcNow) == null, "keeps different browsers separate");
+    Assert(bridge.ConnectionCount("Chrome", DateTimeOffset.UtcNow) == 1 && bridge.ConnectionCount("Edge", DateTimeOffset.UtcNow) == 0,
+        "installation progress counts reports only from the chosen browser");
     Assert(bridge.Get("Chrome", DateTimeOffset.UtcNow.AddSeconds(13)) == null, "stale extension report becomes unknown");
     using (var second = await Connect("chrome-extension://bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"))
     {
@@ -95,6 +98,7 @@ try
     Assert(bridge.Get("Chrome", DateTimeOffset.UtcNow) != null, "disconnected profile no longer affects matching");
     await Send(first, new { type = "report", url = "https://study.example.com", focused = false, ambiguous = false });
     await Until(() => bridge.Get("Chrome", DateTimeOffset.UtcNow) == null);
+    Assert(bridge.ConnectionCount("Chrome", DateTimeOffset.UtcNow) == 1, "setup remains connected while the desktop app is in front without using a background page as focused study");
     Assert(true, "background browser cannot count as foreground study");
     await first.SendAsync(Encoding.UTF8.GetBytes(new string('x', 9000)), WebSocketMessageType.Text, true, CancellationToken.None);
     await Until(() => bridge.ConnectionCount(DateTimeOffset.UtcNow) == 0);

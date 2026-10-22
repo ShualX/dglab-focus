@@ -37,7 +37,7 @@
             <TextBlock Text="STUDY ROOM" Style="{StaticResource Caption}" FontFamily="Bahnschrift" FontSize="11"/>
           </StackPanel>
           <StackPanel DockPanel.Dock="Bottom" Margin="12,12,0,0">
-            <TextBlock Text="WINDOWS · v0.4.2" Style="{StaticResource Caption}" FontFamily="Bahnschrift"/>
+            <TextBlock Text="WINDOWS · v0.4.3" Style="{StaticResource Caption}" FontFamily="Bahnschrift"/>
             <TextBlock Text="独立开源项目 / DG-LAB 4" Style="{StaticResource Caption}" FontSize="11" Margin="0,6,0,0"/>
           </StackPanel>
           <StackPanel>
@@ -514,7 +514,24 @@
                 <StackPanel>
                   <TextBlock Text="Chrome / Edge 连接" Style="{StaticResource SectionTitle}"/>
                   <TextBlock x:Name="BridgeLabel" Text="等待扩展连接"/>
-                  <TextBlock Text="在浏览器的扩展管理页开启开发者模式，加载下载包中的 extension 文件夹。在扩展弹窗中粘贴本机配对码。" Style="{StaticResource Caption}" Margin="0,10,0,16"/>
+                  <TextBlock Text="一键准备扩展、复制安装目录并打开浏览器设置。浏览器确认加载后自动配对，无需手动输入配对码。" Style="{StaticResource Caption}" Margin="0,10,0,16"/>
+                  <WrapPanel>
+                    <Button x:Name="ConfigureChromeButton" Content="一键配置 Chrome" Tag="Chrome" Click="ConfigureBrowserClick" Style="{StaticResource Primary}" Margin="0,0,12,8"/>
+                    <Button x:Name="ConfigureEdgeButton" Content="一键配置 Edge" Tag="Edge" Click="ConfigureBrowserClick" Margin="0,0,0,8"/>
+                  </WrapPanel>
+                  <Border x:Name="BrowserSetupPanel" Visibility="Collapsed" Background="{DynamicResource Bg}" BorderBrush="{DynamicResource Line}" BorderThickness="1" CornerRadius="9" Padding="16" Margin="0,8,0,14">
+                    <StackPanel>
+                      <TextBlock x:Name="BrowserSetupLaunchLabel" Style="{StaticResource Caption}" Margin="0,0,0,14"/>
+                      <TextBlock x:Name="BrowserSetupPreparedLabel" Foreground="{DynamicResource Accent}"/>
+                      <TextBlock x:Name="BrowserSetupLoadLabel" Margin="0,12,0,10"/>
+                      <TextBox x:Name="PreparedExtensionPathBox" IsReadOnly="True" TextWrapping="Wrap" AutomationProperties.Name="浏览器扩展安装目录"/>
+                      <Button Content="复制安装目录" Click="CopyPreparedExtensionPathClick" HorizontalAlignment="Left" Margin="0,10,0,14"/>
+                      <TextBlock x:Name="BrowserSetupConnectionLabel" Foreground="{DynamicResource Accent}" AutomationProperties.LiveSetting="Polite"/>
+                      <TextBlock Text="安装目录固定保存在本机，升级软件后不变。请勿分享该目录，其中包含本机配对信息。" Style="{StaticResource Caption}" Margin="0,12,0,0"/>
+                    </StackPanel>
+                  </Border>
+                  <Expander Header="手动安装与旧版配对" Foreground="{DynamicResource Text}" Margin="0,12,0,0">
+                  <StackPanel Margin="0,12,0,0">
                   <Button Content="复制本机配对码" Click="CopyTokenClick" HorizontalAlignment="Left"/>
                   <WrapPanel Margin="0,12,0,0">
                     <Button Content="打开扩展文件夹" Click="OpenExtensionFolderClick" Margin="0,0,10,8"/>
@@ -522,6 +539,8 @@
                     <Button Content="Chrome 扩展设置" Tag="chrome" Click="OpenBrowserSetupClick" Margin="0,0,10,8"/>
                     <Button Content="Edge 扩展设置" Tag="msedge" Click="OpenBrowserSetupClick" Margin="0,0,0,8"/>
                   </WrapPanel>
+                  </StackPanel>
+                  </Expander>
                   <TextBlock Text="扩展只向 127.0.0.1 发送当前窗口的活动页地址，不采集页面正文、密码或键入内容。完整地址仅在内存匹配，记录不保存浏览历史。" Style="{StaticResource Caption}" Margin="0,14,0,0"/>
                 </StackPanel>
               </Border>

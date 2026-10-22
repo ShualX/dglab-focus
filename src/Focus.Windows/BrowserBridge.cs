@@ -99,6 +99,7 @@ public sealed class BrowserBridge(string token, int port = BrowserBridge.Port) :
         return fresh.Count == 1 && !fresh[0].Ambiguous ? fresh[0] : null;
     }
     public int ConnectionCount(DateTimeOffset now) => reports.Values.Count(x => now - x.ReceivedAt < TimeSpan.FromSeconds(12));
+    public int ConnectionCount(string browser, DateTimeOffset now) => reports.Values.Count(x => x.Browser == browser && now - x.ReceivedAt < TimeSpan.FromSeconds(12));
     public void Dispose()
     {
         lifetime.Cancel();

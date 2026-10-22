@@ -41,9 +41,15 @@ Windows 专注工具。可设计多个方案，每个方案保存自己的软件
 
 ### Chrome / Edge
 
-1. 打开 `chrome://extensions` 或 `edge://extensions`，启用开发者模式。
-2. 点击「加载已解压的扩展」，选择下载包内的 `extension` 文件夹。
-3. 在 Windows 软件的「设备与浏览器」复制本机配对码，粘贴到浏览器扩展弹窗，点击保存并连接。
+1. 在软件「设备与浏览器」点击「一键配置 Chrome」或「一键配置 Edge」。软件准备固定安装目录、复制路径，并打开对应浏览器的扩展管理页。
+2. 浏览器中启用「开发者模式」，点击「加载已解压的扩展」，粘贴已复制的目录并选择文件夹。这一步由浏览器确认，扩展尚未上架商店，当前无法静默装入。
+3. 加载后自动配对，无需粘贴配对码。软件收到所选浏览器的报告后显示连接完成，随后切换到普通网页即可检测。
+
+![软件内准备扩展与自动配对](docs/images/browser-setup.png)
+
+扩展固定安装到 `%LOCALAPPDATA%\DglabFocus\BrowserExtension`，升级软件后目录不变。再次点击配置可更新扩展文件，浏览器中已加载该目录时需点击扩展的重新加载按钮。若之前从下载包的 `extension` 目录安装过，请先移除旧副本，避免同一浏览器重复上报。
+
+准备目录包含本机配对信息，请勿分享或上传。公开下载包内不包含配对码。手动安装与旧版配对入口保留在折叠区，曾主动设置过的手动配对码优先使用。
 
 Chrome 和 Edge 各加载一次。扩展只报告当前窗口的活动标签页地址与窗口焦点，不读取页面正文、密码或键入内容，不支持无痕窗口。
 
@@ -122,7 +128,7 @@ DG-LAB 配对默认使用局域网直连：手机与电脑需在同一路由器�
 dotnet build src/Focus.Windows/Focus.Windows.csproj -c Release
 dotnet run --project tests/Focus.Core.Tests -c Release
 dotnet run --project tests/Focus.Windows.Tests -c Release
-node --test tests/extension.test.js
+node --test tests/extension.test.js tests/extension-background.test.js
 powershell -ExecutionPolicy Bypass -File scripts/package.ps1
 ```
 
@@ -134,7 +140,7 @@ powershell -ExecutionPolicy Bypass -File scripts/package.ps1
 .\src\Focus.Windows\bin\Release\net8.0-windows\DglabFocus.exe --smoke-test --capture-dir D:\temp\dglab-focus-ui
 ```
 
-当前验证覆盖 64 项核心测试、64 项 Windows 集成检查和 6 项扩展测试。软件选择检查包含两个独立测试窗口的枚举、合并和 WinEvent 激活通知，以及列表搜索、确认、取消、超时、方案切换和过期异步结果。Windows 检查还包括局域网配对和模拟 App 的真实 WebSocket RPC、通道、有限时长任务、授权与停止竞争、手机超时、蓝牙断开。另有安装、卸载与 WPF 渲染检查。手机实际配对、实体主机和用户浏览器内的手动加载流程仍待实测。
+当前验证覆盖 64 项核心测试、77 项 Windows 集成检查和 14 项扩展测试。扩展配置检查覆盖固定目录更新、私有配对配置、非本项目文件保护、浏览器启动参数及自动认证。扩展后台在模拟 Chrome API 和 WebSocket 的环境中执行，验证桥接确认前不会误报连接成功。软件选择、局域网配对、模拟 App 的控制协议与原有功能另有回归检查。手机实际配对、实体主机和用户浏览器内的加载确认仍待实测。
 
 ## 结构
 

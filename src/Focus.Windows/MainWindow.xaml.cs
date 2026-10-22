@@ -259,6 +259,7 @@ public partial class MainWindow : Window
         PolicyEditor.IsEnabled = AppRuleEditor.IsEnabled = StrengthSettingsEditor.IsEnabled = editable;
         RefreshPlans();
         RefreshDeviceControls();
+        RefreshBrowserSetup();
         var summary = $"白名单 {rules.Count(x => x.Action == RuleAction.Allow)} 条 · 黑名单 {rules.Count(x => x.Action == RuleAction.Block)} 条。";
         RuleLockLabel.Text = summary + (session.IsActive ? "本次会话规则与模式已锁定。" : "黑名单始终优先，白名单模式下未列出内容算分心。");
         floating?.Update(stateText, Clock(seconds), session.State, session.NeedsCheckIn, session.DebtSeconds, o.AlertThresholdSeconds);
@@ -582,6 +583,7 @@ public partial class MainWindow : Window
             NewPlanClick(this, new RoutedEventArgs());
             if (StrengthEnabledBox.IsChecked != true) throw new InvalidOperationException("新方案没有默认启用曲线预览。");
             await RunApplicationSelectionSmoke(folder, args);
+            await RunBrowserSetupSmoke(folder);
             PlanNameBox.Text = "网课复习";
             rules.Add(new(RuleKind.Domain, "learn.example.com"));
             rules.Add(new(RuleKind.Page, "https://docs.example.com/course/lesson-1"));

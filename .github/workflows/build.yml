@@ -19,7 +19,7 @@ jobs:
       - run: dotnet run --project tests/Focus.Windows.Tests -c Release
         env:
           DGLAB_UI_TEST_CAPTURE: ${{ github.workspace }}\artifacts\device-ui
-      - run: node --test tests/extension.test.js
+      - run: node --test tests/extension.test.js tests/extension-background.test.js
       - run: dotnet build src/Focus.Windows/Focus.Windows.csproj -c Release --nologo
       - name: Render UI
         shell: pwsh

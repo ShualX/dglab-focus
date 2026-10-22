@@ -167,6 +167,7 @@ internal static class DglabIntegration
                 var result = File.ReadAllText(Path.Combine(folder, "smoke-result.txt"));
                 assert(process.ExitCode == 0 && result.Contains("UI authorization"), "Windows UI connects a local fake App, arms, starts its plan, emits bounded requests and stops immediately: " + (process.ExitCode == 0 ? "PASS" : result));
                 assert(result.Contains("native window activation"), "Windows UI enumerates two fixture windows, merges them, captures a real WinEvent notification and applies its executable rule");
+                assert(result.Contains("desktop extension setup"), "Windows UI prepares an automatically paired extension and distinguishes pending installation from an actual connection");
             }
             finally
             {
