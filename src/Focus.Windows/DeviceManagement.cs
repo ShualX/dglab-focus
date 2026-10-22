@@ -84,8 +84,10 @@ public partial class MainWindow
             DeviceInfoLabel.Text = ready ? $"{current.Name} · App 通道上限 {limit:0.#}。软件硬上限还受本次手动数值约束。" : reason;
         }
         else DeviceInfoLabel.Text = "选择一台主机。配对成功后，App 中已开放的设备会出现在这里。";
-        OutputModeLabel.Text = device.IsArmed ? "●  真实输出已授权 · 随时可停止" : "●  模拟模式 · 未授权设备";
+        RefreshOutputDisplay();
         if (device.IsArmed) DeviceStatusLabel.Text = session.IsActive ? "设备已授权，当前会话正在运行。" : "设备已授权，等待开始所选方案。";
+        else if (DeviceStatusLabel.Text.StartsWith("设备已授权", StringComparison.Ordinal))
+            DeviceStatusLabel.Text = "真实输出未授权，当前请求为零。";
         DeviceOutputLabel.Text = device.IsArmed ? $"本次已授权 · 当前请求强度 {device.RequestedIntensity}。立即停止可随时清零。"
             : options?.DeviceFeedback == true ? "此方案要求真实输出：连接设备、填写本次上限并授权后才能开始。"
             : "此方案使用模拟模式。如需真实输出，请先在方案的强度曲线中启用。";

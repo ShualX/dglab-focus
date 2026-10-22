@@ -31,6 +31,20 @@ async Task Until(Func<bool> condition)
 }
 try
 {
+    var previewDisplay = OutputDisplay.Create(new(), 25, default);
+    Assert(previewDisplay.Value == "25%" && previewDisplay.Status.Contains("模拟") && previewDisplay.Level == 25,
+        "simulation displays the curve explicitly as a percentage without claiming device output");
+    var realDisplay = OutputDisplay.Create(new() { DeviceFeedback = true }, 40, new(true, 1, 20, 3));
+    Assert(realDisplay.Value == "3 / 20" && realDisplay.BallValue == "3" && realDisplay.Status.Contains("B") && realDisplay.Level == 3,
+        "real intensity display uses the controller's current B-channel request instead of the curve percentage");
+    var waitingDisplay = OutputDisplay.Create(new() { DeviceFeedback = true }, 40, new(true, 0, 20, 0));
+    Assert(waitingDisplay.Value == "0 / 20" && waitingDisplay.Level == 0 && waitingDisplay.Status.Contains("待命"),
+        "authorized waiting shows zero rather than claiming that the target curve has already been sent");
+    var revokedDisplay = OutputDisplay.Create(new() { DeviceFeedback = true }, 40, new(false, 0, 20, 9));
+    Assert(revokedDisplay.Value == "0" && revokedDisplay.Status.Contains("待授权") && revokedDisplay.Level == 0,
+        "revoked output never retains a stale nonzero display or mislabels a real plan as simulation");
+    Assert(OutputDisplay.Create(null, 0, default).Value == "—" && OutputDisplay.Create(new(), 0, new(true, 0, 20, 2)).Value == "2 / 20",
+        "empty selection is distinct from zero output and active controller output remains visible during plan changes");
     BrowserSetupChecks.Run(Assert);
     await LocalRelayIntegration.Run(Assert);
     await DglabIntegration.Run(Assert);

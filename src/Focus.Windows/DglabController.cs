@@ -8,6 +8,8 @@ using DglabFocus.Core;
 
 namespace DglabFocus.Windows;
 
+public readonly record struct DeviceOutputState(bool Authorized, int Channel, int Limit, int Requested);
+
 public sealed class DglabController : IDisposable
 {
     public const string RelayUrl = "wss://trex.dungeon-lab.cn/v4";
@@ -31,16 +33,25 @@ public sealed class DglabController : IDisposable
     public bool IsArmed => armed;
     public bool IsConnected => socket?.State == WebSocketState.Open;
     public int RequestedIntensity => Volatile.Read(ref intensity);
+    public DeviceOutputState OutputState
+    {
+        get { lock (sync) return armed ? new(true, channel, cap, RequestedIntensity) : default; }
+    }
     public string Status { get; private set; } = "未连接";
     public string? PairingSocketUrl { get; private set; }
     public event Action<string, string?>? Updated;
     public event Action? DevicesChanged;
+    public event Action? OutputChanged;
     public event Action<string>? Faulted;
     public IReadOnlyList<DglabDevice> Devices { get { lock (sync) return devices.Values.OrderBy(x => x.Name).ToList(); } }
 
     public DglabController(Uri? relayUri = null) => defaultRelay = relay = relayUri ?? new Uri(RelayUrl);
     private void Report(string text, string? url = null)
     { if (url == "") PairingSocketUrl = null; Status = text; Updated?.Invoke(text, url); }
+    private void SetIntensity(int value)
+    {
+        if (Interlocked.Exchange(ref intensity, value) != value) OutputChanged?.Invoke();
+    }
     private DglabDevice? Selected { get { lock (sync) return selectedKey != null ? devices.GetValueOrDefault(selectedKey) : null; } }
 
     public async Task Connect(Uri? endpoint = null)
@@ -98,7 +109,7 @@ public sealed class DglabController : IDisposable
         {
             if (ReferenceEquals(socket, ws) && !ct.IsCancellationRequested)
             {
-                armed = false; Volatile.Write(ref desired, 0); Volatile.Write(ref intensity, 0);
+                armed = false; Volatile.Write(ref desired, 0); SetIntensity(0);
                 lifetime?.Cancel();
                 foreach (var item in pending.Values) item.Completion.TrySetCanceled();
                 lock (sync) { devices.Clear(); clients.Clear(); }
@@ -284,7 +295,7 @@ public sealed class DglabController : IDisposable
     {
         await RequestAsync(target.ClientId, "device.op.clear", new() { ["s"] = target.SlotId, ["c"] = channel }, 2).ConfigureAwait(false);
         await RequestAsync(target.ClientId, "device.op", DglabProtocol.Operation(target.SlotId, channel, 7, JsonValue.Create(0)!), 2).ConfigureAwait(false);
-        Volatile.Write(ref intensity, 0);
+        SetIntensity(0);
     }
     public async Task StopAsync()
     {
@@ -294,7 +305,7 @@ public sealed class DglabController : IDisposable
         try { if (Selected is { } target && IsConnected) await ResetAsync(target); }
         catch (Exception e) when (e is InvalidOperationException or OperationCanceledException or TimeoutException or WebSocketException or IOException)
         { Report("已停止续发。停机确认未返回，请在手机 App 检查通道。"); }
-        finally { Volatile.Write(ref intensity, 0); outputGate.Release(); }
+        finally { SetIntensity(0); outputGate.Release(); }
     }
     private async Task FailAsync(string reason)
     {
@@ -332,7 +343,7 @@ public sealed class DglabController : IDisposable
                     if (!armed) continue;
                     var pulse = await QueueAsync(target.ClientId, "device.op", DglabProtocol.Pulse(target.SlotId, channel));
                     _ = ObserveAsync(pulse, generation);
-                    Volatile.Write(ref intensity, level); lastLease = Stopwatch.GetTimestamp();
+                    SetIntensity(level); lastLease = Stopwatch.GetTimestamp();
                 }
                 finally { outputGate.Release(); }
             }
@@ -367,7 +378,7 @@ public sealed class DglabController : IDisposable
     public void Dispose()
     {
         lock (sync) { epoch++; armed = false; }
-        Volatile.Write(ref desired, 0); Volatile.Write(ref intensity, 0);
+        Volatile.Write(ref desired, 0); SetIntensity(0);
         PairingSocketUrl = null;
         lifetime?.Cancel(); socket?.Dispose(); socket = null;
         foreach (var item in pending.Values) item.Completion.TrySetCanceled();

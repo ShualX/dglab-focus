@@ -194,6 +194,50 @@ Test("repeat rounds share temporary quota", () => {
     var s = New(options: new() { FocusMinutes = 1, RestMinutes = 1, Repeat = true }); s.AddTemporaryDomain("docs.example.com", origin, out _);
     Advance(s, 120); Equal(SessionState.Focusing, s.State); True(!s.AddTemporaryDomain("other.example.com", origin, out _));
 });
+Test("hard mode defaults off for new and legacy options", () => {
+    True(!new SessionOptions().HardMode);
+    var legacy = JsonSerializer.Deserialize<SessionOptions>("""{"FocusMinutes":0}""")!;
+    True(!legacy.HardMode); legacy.Validate();
+});
+Test("hard mode requires a finite positive focus duration", () => {
+    foreach (var minutes in new[] { 0, -1, double.NaN, double.PositiveInfinity }) {
+        var rejected = false;
+        try { new SessionOptions { HardMode = true, FocusMinutes = minutes }.Validate(); } catch (ArgumentException) { rejected = true; }
+        True(rejected);
+    }
+    new SessionOptions { HardMode = true, FocusMinutes = .5 }.Validate();
+});
+Test("hard mode rejects early exit and breaks at the session layer", () => {
+    var s = New(options: new() { HardMode = true, FocusMinutes = 1, RestMinutes = 1 });
+    Advance(s, 11, Attention.Outside); var debt = s.DebtSeconds;
+    s.RequestExit(origin.AddSeconds(11)); s.TakeBreak(origin.AddSeconds(11));
+    Equal(SessionState.Focusing, s.State); True(s.IsHardModeLocked); Equal(0d, s.ExitRemaining);
+    Equal(11d, s.FocusSeconds); Equal(debt, s.DebtSeconds); True(s.PreviewStrength > 0);
+});
+Test("hard mode completes at its fixed deadline without a rest or repeat round", () => {
+    var s = New(options: new() { HardMode = true, FocusMinutes = 1, RestMinutes = 10, Repeat = true, DeviceFeedback = true });
+    Advance(s, 59, Attention.Outside); Equal(SessionState.Focusing, s.State); True(s.OutputPercent > 0);
+    Advance(s, 1, Attention.Outside, 59); Equal(SessionState.Completed, s.State); Equal(0d, s.OutputPercent); True(!s.IsHardModeLocked);
+    Advance(s, 300, Attention.Outside, 60); Equal(SessionState.Completed, s.State);
+});
+Test("hard mode preserves emergency suspension and persists its lock across restart", () => {
+    var s = New(options: new() { HardMode = true, FocusMinutes = 1, DeviceFeedback = true });
+    s.AddTemporaryDomain("reference.example.com", origin, out _); Advance(s, 20, Attention.Outside);
+    s.Suspend(origin.AddSeconds(20), "emergency stop"); Equal(0d, s.OutputPercent); True(s.IsHardModeLocked);
+    Advance(s, 20, Attention.Outside, 20); Equal(20d, s.FocusSeconds);
+    var restored = Session.Restore(JsonSerializer.Deserialize<SessionSnapshot>(JsonSerializer.Serialize(s.Snapshot()))!);
+    True(restored.IsHardModeLocked); Equal(SessionState.Suspended, restored.State); Equal(0d, restored.OutputPercent);
+    restored.RequestExit(origin.AddSeconds(40)); Equal(SessionState.Suspended, restored.State);
+    Equal("reference.example.com", restored.TemporaryHost); Equal(s.DebtSeconds, restored.DebtSeconds);
+    restored.Resume(origin.AddSeconds(40)); Advance(restored, 40, Attention.Allowed, 40);
+    Equal(SessionState.Completed, restored.State);
+});
+Test("hard mode still suspends on detection stalls instead of catching up output", () => {
+    var s = New(options: new() { HardMode = true, FocusMinutes = 1, DeviceFeedback = true });
+    Advance(s, 10, Attention.Outside); True(s.OutputPercent > 0);
+    s.Tick(TimeSpan.FromSeconds(6), origin.AddSeconds(16), Attention.Outside, 0);
+    Equal(SessionState.Suspended, s.State); Equal(0d, s.OutputPercent); Equal(10d, s.FocusSeconds);
+});
 Test("new session resets temporary rule but retains rolling incidents", () => {
     var s = New(); s.AddTemporaryDomain("docs.example.com", origin, out _); Advance(s, 11, Attention.Outside); s.RequestExit(origin.AddSeconds(11)); Advance(s, 300, offset: 11);
     s.Start(new() { FocusMinutes = 0 }, [Domain("study.example.com")], origin.AddSeconds(311));

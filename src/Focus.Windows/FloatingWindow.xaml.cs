@@ -16,15 +16,23 @@ public partial class FloatingWindow : Window
         var area = SystemParameters.WorkArea;
         Left = area.Right - Width - 24; Top = area.Bottom - Height - 24;
     }
-    public void Update(string label, string time, SessionState value, bool needsCheckIn, double strength, double maximum)
+    public void Update(string label, string time, SessionState value, bool needsCheckIn, bool hardMode)
     {
         state = value;
-        StateLabel.Text = label; TimeLabel.Text = BallTimeLabel.Text = time;
-        Progress.Maximum = Math.Max(1, maximum); Progress.Value = Math.Min(strength, Progress.Maximum);
-        Progress.ToolTip = $"当前曲线 {strength:0.#}% / 上限 {maximum:0.#}%";
-        ExitButton.Content = value == SessionState.ExitPending ? "取消退出" : "申请退出";
-        ExitButton.IsEnabled = value is SessionState.Focusing or SessionState.Resting or SessionState.ExitPending;
+        StateLabel.Text = label + (hardMode ? " · 狠心" : ""); TimeLabel.Text = BallTimeLabel.Text = time;
+        ExitButton.Content = hardMode ? "到时自动结束" : value == SessionState.ExitPending ? "取消退出" : "申请退出";
+        ExitButton.IsEnabled = !hardMode && value is SessionState.Focusing or SessionState.Resting or SessionState.ExitPending;
         CheckInButton.Visibility = needsCheckIn ? Visibility.Visible : Visibility.Collapsed;
+    }
+    public void UpdateFeedback(OutputDisplay display)
+    {
+        FeedbackStatusLabel.Text = display.Status; FeedbackValueLabel.Text = display.Value; FeedbackDetailLabel.Text = display.Detail;
+        BallOutputLabel.Text = display.BallStatus; BallStrengthLabel.Text = display.BallValue;
+        var description = $"{display.Status}，{display.Detail}：{display.Value}。点击展开，Ctrl+Alt+F10 立即停电。";
+        Ball.ToolTip = description;
+        System.Windows.Automation.AutomationProperties.SetName(Ball, description);
+        Progress.Maximum = Math.Max(1, display.Maximum); Progress.Value = Math.Min(display.Level, Progress.Maximum);
+        Progress.ToolTip = $"{display.Detail}：{display.Value}";
     }
     public void SetMessage(string message) => MessageLabel.Text = message;
     private void OpenClick(object sender, RoutedEventArgs e) => OpenRequested?.Invoke();
@@ -33,7 +41,7 @@ public partial class FloatingWindow : Window
     private void ExpandClick(object sender, RoutedEventArgs e) => Expand();
     public void Expand()
     {
-        Width = 300; Height = 204; Ball.Visibility = Visibility.Collapsed; ControlsPanel.Visibility = Visibility.Visible;
+        Width = 300; Height = 280; Ball.Visibility = Visibility.Collapsed; ControlsPanel.Visibility = Visibility.Visible;
         var area = SystemParameters.WorkArea; Left = Math.Min(Left, area.Right - Width); Top = Math.Min(Top, area.Bottom - Height);
         if (System.Windows.Application.Current.MainWindow is MainWindow { CanAnimate: true })
             ControlsPanel.BeginAnimation(OpacityProperty, new DoubleAnimation(.2, 1, TimeSpan.FromMilliseconds(180)));

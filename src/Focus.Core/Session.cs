@@ -8,6 +8,7 @@ public sealed record SessionOptions
     public double FocusMinutes { get; init; } = 50;
     public double RestMinutes { get; init; } = 10;
     public bool Repeat { get; init; }
+    public bool HardMode { get; init; }
     public StudyMode Mode { get; init; }
     public RuleMode ApplicationMode { get; init; }
     public RuleMode WebsiteMode { get; init; }
@@ -25,6 +26,8 @@ public sealed record SessionOptions
             throw new ArgumentException("请选择有效的学习方式与黑白名单模式。");
         if (StrengthPreview == null) throw new ArgumentException("模拟强度设置无效。");
         StrengthPreview.Validate();
+        if (HardMode && (!double.IsFinite(FocusMinutes) || FocusMinutes <= 0))
+            throw new ArgumentException("狠心模式必须设置有限的专注时长，不能设为 0。到时结束，不进入休息或循环。");
         if (!double.IsFinite(FocusMinutes) || FocusMinutes < 0 || FocusMinutes > 1440
             || !double.IsFinite(RestMinutes) || RestMinutes < 0 || RestMinutes > 240
             || !double.IsFinite(GraceSeconds) || GraceSeconds < 1 || GraceSeconds > 300
@@ -75,6 +78,7 @@ public sealed class Session
     public string StatusReason { get; private set; } = "配置允许使用的内容，开始这一段专注。";
     public List<DateTimeOffset> Incidents { get; private set; } = [];
     public bool IsActive => State is SessionState.Focusing or SessionState.Resting or SessionState.ExitPending or SessionState.Suspended;
+    public bool IsHardModeLocked => IsActive && Options.HardMode;
     public event Action<SessionEvent>? Changed;
     private double outsideSeconds, recoverySeconds;
     private bool incidentCounted, restEndsSession;
@@ -129,6 +133,7 @@ public sealed class Session
 
     public void RequestExit(DateTimeOffset now)
     {
+        if (IsHardModeLocked) return;
         if (State is not (SessionState.Focusing or SessionState.Resting)) return;
         ExitRemaining = ExitDelaySeconds;
         State = SessionState.ExitPending;
@@ -168,6 +173,7 @@ public sealed class Session
     }
     public void TakeBreak(DateTimeOffset now)
     {
+        if (IsHardModeLocked) return;
         if (State != SessionState.Focusing || Options.RestMinutes <= 0) return;
         State = SessionState.Resting;
         previewEligible = false;
@@ -213,6 +219,7 @@ public sealed class Session
         else if (Options.FocusMinutes > 0 && SegmentSeconds >= Options.FocusMinutes * 60)
         {
             SegmentSeconds = 0;
+            if (Options.HardMode) { Complete(now, "狠心模式的约定时长已完成，专注结束。"); return; }
             if (Options.RestMinutes > 0)
             {
                 TakeBreak(now);

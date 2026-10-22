@@ -96,8 +96,9 @@ public partial class MainWindow : Window
                 PairingAddressBox.Text = device.PairingSocketUrl ?? "";
                 PairingPanel.Visibility = Visibility.Visible;
             }
-            RefreshConnectionControls();
+            RefreshDeviceControls();
         });
+        device.OutputChanged += () => Dispatcher.InvokeAsync(RefreshOutputDisplay);
         device.DevicesChanged += () => Dispatcher.InvokeAsync(RefreshDeviceList);
         device.Faulted += reason => Dispatcher.InvokeAsync(() =>
         {
@@ -131,7 +132,8 @@ public partial class MainWindow : Window
         var o = settings.Options;
         string N(double v) => v.ToString(CultureInfo.InvariantCulture);
         FocusMinutesBox.Text = N(o.FocusMinutes); RestMinutesBox.Text = N(o.RestMinutes);
-        ModeBox.SelectedIndex = (int)o.Mode; RepeatBox.IsChecked = o.Repeat;
+        ModeBox.SelectedIndex = (int)o.Mode; RepeatBox.IsChecked = o.Repeat; HardModeBox.IsChecked = o.HardMode;
+        RefreshHardModeEditor();
         GraceBox.Text = N(o.GraceSeconds);
         IdleBox.Text = N(o.IdleSeconds); CheckInMinutesBox.Text = N(o.CheckInMinutes);
         RecoveryDelayBox.Text = N(o.RecoveryDelaySeconds); RecoveryRateBox.Text = N(o.RecoveryRate);
@@ -161,7 +163,7 @@ public partial class MainWindow : Window
         var o = new SessionOptions
         {
             FocusMinutes = Number(FocusMinutesBox), RestMinutes = Number(RestMinutesBox), Mode = (StudyMode)ModeBox.SelectedIndex,
-            Repeat = RepeatBox.IsChecked == true, GraceSeconds = Number(GraceBox),
+            Repeat = RepeatBox.IsChecked == true, HardMode = HardModeBox.IsChecked == true, GraceSeconds = Number(GraceBox),
             IdleSeconds = Number(IdleBox), CheckInMinutes = Number(CheckInMinutesBox), RecoveryDelaySeconds = Number(RecoveryDelayBox), RecoveryRate = Number(RecoveryRateBox),
             ApplicationMode = (RuleMode)AppPolicyBox.SelectedIndex, WebsiteMode = (RuleMode)WebPolicyBox.SelectedIndex,
             StrengthPreview = ReadStrength(), DeviceFeedback = DeviceFeedbackBox.IsChecked == true, IdlePolicy = (IdlePolicy)IdlePolicyBox.SelectedIndex
@@ -234,7 +236,7 @@ public partial class MainWindow : Window
         Dial.Motion = Motion;
         Dial.Update(progress, Clock(seconds), stateText);
         System.Windows.Automation.AutomationProperties.SetName(Dial, stateText + " " + Clock(seconds));
-        ModeLabel.Text = o.Mode switch { StudyMode.Reading => "阅读 / 网课", StudyMode.Paper => "纸笔复习", _ => "电脑复习" };
+        ModeLabel.Text = (o.Mode switch { StudyMode.Reading => "阅读 / 网课", StudyMode.Paper => "纸笔复习", _ => "电脑复习" }) + (o.HardMode ? " · 狠心" : "");
         DebtLabel.Text = $"{Math.Floor(session.DebtSeconds)} 秒";
         var curve = o.StrengthPreview;
         var atCeiling = curve.Enabled && curve.At(session.DebtSeconds, session.RecentCount(DateTimeOffset.Now)) >= curve.Maximum;
@@ -248,7 +250,10 @@ public partial class MainWindow : Window
         StrengthBar.Maximum = Math.Max(1, o.StrengthPreview.Maximum); StrengthBar.Value = session.PreviewStrength;
         StartButton.Content = session.State switch { SessionState.Suspended => "继续本次会话", SessionState.Resting => "结束休息", SessionState.Focusing => "专注进行中", SessionState.ExitPending => "继续复习，等待退出", _ => "开始专注" };
         StartButton.IsEnabled = storage.LoadError == null && (session.IsActive || SelectedPlan != null) && session.State is not (SessionState.Focusing or SessionState.ExitPending);
-        ExitButton.IsEnabled = session.State is SessionState.Focusing or SessionState.Resting;
+        ExitButton.IsEnabled = !session.IsHardModeLocked && session.State is SessionState.Focusing or SessionState.Resting;
+        ExitButton.Content = session.IsHardModeLocked ? "到时自动结束" : "申请退出";
+        ExitMenuItem.IsEnabled = !session.IsHardModeLocked;
+        BreakButton.IsEnabled = !session.IsHardModeLocked;
         ExitButton.Visibility = session.State == SessionState.ExitPending ? Visibility.Collapsed : Visibility.Visible;
         CancelExitButton.Visibility = session.State == SessionState.ExitPending ? Visibility.Visible : Visibility.Collapsed;
         CheckInPanel.Visibility = session.NeedsCheckIn ? Visibility.Visible : Visibility.Collapsed;
@@ -266,7 +271,8 @@ public partial class MainWindow : Window
         RefreshBrowserSetup();
         var summary = $"白名单 {rules.Count(x => x.Action == RuleAction.Allow)} 条 · 黑名单 {rules.Count(x => x.Action == RuleAction.Block)} 条。";
         RuleLockLabel.Text = summary + (session.IsActive ? "本次会话规则与模式已锁定。" : "黑名单始终优先，白名单模式下未列出内容算分心。");
-        floating?.Update(stateText, Clock(seconds), session.State, session.NeedsCheckIn, session.PreviewStrength, curve.Maximum);
+        floating?.Update(stateText, Clock(seconds), session.State, session.NeedsCheckIn, session.IsHardModeLocked);
+        RefreshOutputDisplay();
     }
     internal static string Clock(double seconds)
     {
@@ -375,10 +381,18 @@ public partial class MainWindow : Window
             StrengthValidationLabel.Text = ex.Message; RampChart.Update(new() { Enabled = false });
         }
     }
-    private void ExitClick(object sender, RoutedEventArgs e) { session.RequestExit(DateTimeOffset.Now); Save(); ShowPage("FocusPage"); Refresh(); }
+    private void ExitClick(object sender, RoutedEventArgs e)
+    {
+        if (session.IsHardModeLocked) { Notice("狠心模式将在约定时长结束后退出。立即停电始终可用。"); return; }
+        session.RequestExit(DateTimeOffset.Now); Save(); ShowPage("FocusPage"); Refresh();
+    }
     private void CancelExitClick(object sender, RoutedEventArgs e) { session.CancelExit(DateTimeOffset.Now); Save(); Refresh(); }
     private void CheckInClick(object sender, RoutedEventArgs e) { session.CheckIn(DateTimeOffset.Now); Save(); Refresh(); }
-    private void BreakClick(object sender, RoutedEventArgs e) { session.TakeBreak(DateTimeOffset.Now); Save(); ShowPage("FocusPage"); Refresh(); }
+    private void BreakClick(object sender, RoutedEventArgs e)
+    {
+        if (session.IsHardModeLocked) { Notice("狠心模式不允许提前休息。立即停电始终可用。"); return; }
+        session.TakeBreak(DateTimeOffset.Now); Save(); ShowPage("FocusPage"); Refresh();
+    }
     private void EmergencyClick(object sender, RoutedEventArgs e) => SuspendForFault("会话已暂停，已停止续发并撤销设备授权。继续时保留本次规则。");
     public void SuspendForFault(string reason)
     {
@@ -441,9 +455,10 @@ public partial class MainWindow : Window
         var menu = new System.Windows.Forms.ContextMenuStrip();
         menu.Items.Add("打开控制台", null, (_, _) => Dispatcher.Invoke(ShowMain));
         menu.Items.Add("显示悬浮球", null, (_, _) => Dispatcher.Invoke(() => FloatClick(this, new RoutedEventArgs())));
-        menu.Items.Add("申请退出专注", null, (_, _) => Dispatcher.Invoke(() => ExitClick(this, new RoutedEventArgs())));
-        menu.Items.Add("立即暂停", null, (_, _) => Dispatcher.Invoke(() => EmergencyClick(this, new RoutedEventArgs())));
-        menu.Items.Add("暂停并关闭软件", null, (_, _) => Dispatcher.Invoke(() => { SuspendForFault("软件已关闭，继续时需确认上次会话。"); Quit(); }));
+        var exitItem = menu.Items.Add("申请退出专注", null, (_, _) => Dispatcher.Invoke(() => ExitClick(this, new RoutedEventArgs())));
+        menu.Items.Add("立即停电 / 紧急暂停", null, (_, _) => Dispatcher.Invoke(() => EmergencyClick(this, new RoutedEventArgs())));
+        var closeItem = menu.Items.Add("停止输出并关闭软件", null, (_, _) => Dispatcher.Invoke(CloseSoftware));
+        menu.Opening += (_, _) => { exitItem.Enabled = closeItem.Enabled = !session.IsHardModeLocked; };
         tray.ContextMenuStrip = menu;
         tray.DoubleClick += (_, _) => Dispatcher.Invoke(ShowMain);
     }
@@ -548,6 +563,8 @@ public partial class MainWindow : Window
     private void WindowClosing(object? sender, CancelEventArgs e)
     {
         if (closing) return;
+        if (session.IsHardModeLocked)
+        { e.Cancel = true; Notice("狠心模式尚未完成，不能提前关闭。立即停电始终可用。"); return; }
         if (session.IsActive && session.State != SessionState.Suspended)
         {
             e.Cancel = true;
@@ -556,6 +573,16 @@ public partial class MainWindow : Window
             return;
         }
         e.Cancel = true; Quit();
+    }
+    private void CloseSoftware()
+    {
+        if (session.IsHardModeLocked) { ShowMain(); Notice("狠心模式将在约定时长结束后退出。立即停电始终可用。"); return; }
+        SuspendForFault("软件已关闭，继续时需确认上次会话。"); Quit();
+    }
+    private void HardModeChanged(object sender, RoutedEventArgs e) => RefreshHardModeEditor();
+    private void RefreshHardModeEditor()
+    {
+        RestMinutesBox.IsEnabled = RepeatBox.IsEnabled = HardModeBox.IsChecked != true;
     }
     private async void Quit()
     {
@@ -708,9 +735,9 @@ public partial class MainWindow : Window
             if (PairingPanel.Visibility != Visibility.Collapsed || PairingAddressBox.Text.Length != 0 || !ConnectionModeBox.IsEnabled)
                 throw new InvalidOperationException("局域网断开后没有清理地址并解锁设置。");
             RefreshLanAddresses();
+            await RunHardModeSmoke(folder, firstId);
             if (Array.IndexOf(args, "--device-test-relay") >= 0)
             {
-                for (int i = 0; i < 301; i++) session.Tick(TimeSpan.FromSeconds(1), DateTimeOffset.Now, Attention.Allowed, 0);
                 SelectPlan(firstId); DeviceFeedbackBox.IsChecked = true; IncidentBoostBox.Text = "0"; SaveSettingsClick(this, new RoutedEventArgs());
                 await device.Connect();
                 var until = Environment.TickCount64 + 4000;
@@ -732,24 +759,50 @@ public partial class MainWindow : Window
                 until = Environment.TickCount64 + 2500;
                 while (device.RequestedIntensity != 2 && Environment.TickCount64 < until) await Task.Delay(20);
                 if (device.RequestedIntensity != 2) throw new InvalidOperationException("分心满 10 秒没有发出起始强度的真实协议指令。");
+                await Dispatcher.InvokeAsync(() =>
+                {
+                    if (OutputIntensityLabel.Text != "2 / 20" || !OutputModeLabel.Text.Contains("A 通道"))
+                        throw new InvalidOperationException("第 10 秒没有在主界面显示当前请求强度与上限。");
+                }, DispatcherPriority.ApplicationIdle);
                 for (int i = 0; i < 30; i++) session.Tick(TimeSpan.FromSeconds(1), DateTimeOffset.Now, Attention.Outside, 0);
                 device.SetDesired(session.OutputPercent);
                 until = Environment.TickCount64 + 2500;
                 while (device.RequestedIntensity != 3 && Environment.TickCount64 < until) await Task.Delay(20);
                 if (device.RequestedIntensity != 3) throw new InvalidOperationException("累计 30 秒没有递增真实协议指令的强度。");
+                await Dispatcher.InvokeAsync(() =>
+                {
+                    if (OutputIntensityLabel.Text != "3 / 20") throw new InvalidOperationException("递增后的请求强度未同步到主界面。");
+                }, DispatcherPriority.ApplicationIdle);
+                ShowPage("FocusPage"); Width = 1180; Height = 830; Refresh();
+                CurrentAppLabel.Text = "Example Game"; CurrentUrlLabel.Text = "示例软件黑名单"; DetectionLabel.Text = "当前内容不符合黑白名单";
+                await Dispatcher.InvokeAsync(() => { UpdateLayout(); Capture(folder, "OutputActive"); }, DispatcherPriority.ApplicationIdle);
+                Width = 920; Height = 680;
+                await Dispatcher.InvokeAsync(() => { UpdateLayout(); Capture(folder, "OutputActiveCompact"); }, DispatcherPriority.ApplicationIdle);
+                floating?.Close(); FloatClick(this, new RoutedEventArgs());
+                if (floating!.FindName("BallStrengthLabel") is not TextBlock { Text: "3" })
+                    throw new InvalidOperationException("悬浮球未显示真实请求强度。");
+                floating.Capture(Path.Combine(folder, "OutputBall.png")); floating.Expand();
+                if (floating.FindName("FeedbackValueLabel") is not TextBlock { Text: "3 / 20" })
+                    throw new InvalidOperationException("展开的悬浮球未显示当前强度与上限。");
+                floating.Capture(Path.Combine(folder, "OutputFloating.png"));
                 Width = 1180; Height = 830; ShowPage("DevicePage"); Refresh();
                 await Dispatcher.InvokeAsync(() => { UpdateLayout(); Capture(folder, "DeviceArmedLocalTest"); }, DispatcherPriority.ApplicationIdle);
                 EmergencyClick(this, new RoutedEventArgs());
                 if (device.IsArmed || session.State != SessionState.Suspended) throw new InvalidOperationException("急停未撤销授权或暂停会话。");
                 await device.StopAsync();
                 if (device.RequestedIntensity != 0) throw new InvalidOperationException("急停未清零设备指令。");
+                RefreshOutputDisplay();
+                if (OutputIntensityLabel.Text != "0" || !OutputModeLabel.Text.Contains("待授权") || floating.FindName("BallStrengthLabel") is not TextBlock { Text: "0" }
+                    || DeviceStatusLabel.Text.StartsWith("设备已授权", StringComparison.Ordinal))
+                    throw new InvalidOperationException("急停后强度显示没有清零或未标明需要重新授权。");
                 await Dispatcher.InvokeAsync(() => { UpdateLayout(); Capture(folder, "DeviceStoppedLocalTest"); }, DispatcherPriority.ApplicationIdle);
             }
             File.WriteAllText(Path.Combine(folder, "smoke-result.txt"), $"PASS: empty plan library, required selection, create/copy/rename/delete/undo, isolated plan rules and timing, invalid edits block switching, active plan locked.\n5 pages, plan tabs, default strength curve, validation, active simulation, exit, floating and compact layouts rendered.\nUnknown state cleared preview. No physical devices or user settings used.\nRuntime: {RuntimeInformation.FrameworkDescription}\n");
             File.AppendAllText(Path.Combine(folder, "smoke-result.txt"), "PASS: built-in relay on loopback only: UI generates a QR and manual server address, locks network choices, disconnects and clears credentials. Wide and compact layouts rendered.\n");
             File.AppendAllText(Path.Combine(folder, "smoke-result.txt"), File.ReadAllText(Path.Combine(folder, "app-selection-result.txt")));
+            File.AppendAllText(Path.Combine(folder, "smoke-result.txt"), File.ReadAllText(Path.Combine(folder, "hard-mode-result.txt")));
             if (Array.IndexOf(args, "--device-test-relay") >= 0)
-                File.AppendAllText(Path.Combine(folder, "smoke-result.txt"), "PASS: local fake App only: UI authorization → selected plan → 10-second activation with zero debt → accumulated-time ramp → bounded V4 requests → emergency stop. No physical device connected.\n");
+                File.AppendAllText(Path.Combine(folder, "smoke-result.txt"), "PASS: local fake App only: UI authorization → selected plan → 10-second activation with zero debt → accumulated-time ramp → bounded V4 requests → emergency stop. Live requested intensity in main header, collapsed ball and expanded panel follows controller changes and clears on stop. No physical device connected.\n");
         }
         catch (Exception e) { File.WriteAllText(Path.Combine(folder, "smoke-result.txt"), "FAIL: " + e); Environment.ExitCode = 1; }
         Quit();

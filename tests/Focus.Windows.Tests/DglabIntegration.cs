@@ -169,6 +169,8 @@ internal static class DglabIntegration
                 assert(result.Contains("native window activation"), "Windows UI enumerates two fixture windows, merges them, captures a real WinEvent notification and applies its executable rule");
                 assert(result.Contains("desktop extension setup"), "Windows UI prepares an automatically paired extension and distinguishes pending installation from an actual connection");
                 assert(result.Contains("10-second activation with zero debt → accumulated-time ramp"), "Windows UI issues zero before 10 seconds, starts V4 output with zero debt at 10 seconds, and raises intensity after 30 accumulated seconds");
+                assert(result.Contains("Live requested intensity in main header"), "Windows UI shows live requests 2 → 3 in the header and floating ball, then clears them on emergency stop");
+                assert(result.Contains("hard mode rejects unlimited duration"), "hard-mode UI locks normal exit, early rest and app close while preserving emergency stop and fixed-duration completion");
             }
             finally
             {
