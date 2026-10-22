@@ -13,6 +13,9 @@ foreach ($name in @('README.md','LICENSE','THIRD_PARTY_NOTICES.md')) { Copy-Item
 Copy-Item -LiteralPath (Join-Path $projectRoot 'extension') -Destination $bundleRoot -Recurse -Force
 Copy-Item -LiteralPath (Join-Path $projectRoot 'licenses') -Destination $bundleRoot -Recurse -Force
 Copy-Item -LiteralPath (Join-Path $projectRoot 'docs') -Destination $bundleRoot -Recurse -Force
+$installerFolder = Join-Path $bundleRoot 'setup'
+New-Item -ItemType Directory -Path $installerFolder -Force | Out-Null
+foreach ($name in @('install.ps1','uninstall.ps1','Install.cmd','Uninstall.cmd')) { Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) -Destination $installerFolder -Force }
 $archive = Join-Path $projectRoot 'dist\dglab-focus-windows-x64.zip'
 Compress-Archive -Path (Join-Path $bundleRoot '*') -DestinationPath $archive -Force
 Get-FileHash -LiteralPath $archive -Algorithm SHA256 | ForEach-Object { ($_.Hash.ToLowerInvariant() + '  dglab-focus-windows-x64.zip') | Set-Content -LiteralPath (Join-Path $projectRoot 'dist\SHA256SUMS.txt') -Encoding ascii }

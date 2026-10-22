@@ -37,8 +37,8 @@
             <TextBlock Text="STUDY ROOM" Style="{StaticResource Caption}" FontFamily="Bahnschrift" FontSize="11"/>
           </StackPanel>
           <StackPanel DockPanel.Dock="Bottom" Margin="12,12,0,0">
-            <TextBlock Text="WINDOWS · v0.3.0" Style="{StaticResource Caption}" FontFamily="Bahnschrift"/>
-            <TextBlock Text="独立开源项目 / 模拟预览版" Style="{StaticResource Caption}" FontSize="11" Margin="0,6,0,0"/>
+            <TextBlock Text="WINDOWS · v0.4.0" Style="{StaticResource Caption}" FontFamily="Bahnschrift"/>
+            <TextBlock Text="独立开源项目 / DG-LAB 4" Style="{StaticResource Caption}" FontSize="11" Margin="0,6,0,0"/>
           </StackPanel>
           <StackPanel>
             <Button x:Name="NavFocus" Content="◉   专注控制台" Style="{StaticResource Nav}" Tag="FocusPage" Click="NavigateClick"/>
@@ -47,7 +47,7 @@
             <Button Content="⌁   设备与浏览器" Style="{StaticResource Nav}" Tag="DevicePage" Click="NavigateClick"/>
             <Button Content="≡   会话记录" Style="{StaticResource Nav}" Tag="HistoryPage" Click="NavigateClick"/>
             <Border Height="1" Background="{DynamicResource Line}" Margin="10,20"/>
-            <Button Content="立即暂停" Foreground="{DynamicResource Danger}" Click="EmergencyClick" ToolTip="暂停会话与模拟反馈，不受退出倒计时限制"/>
+            <Button Content="立即暂停" Foreground="{DynamicResource Danger}" Click="EmergencyClick" ToolTip="暂停会话、撤销设备授权并停止续发，不受退出倒计时限制"/>
             <TextBlock x:Name="HotkeyLabel" Text="Ctrl + Alt + F10" Style="{StaticResource Caption}" FontSize="11" HorizontalAlignment="Center" Margin="0,8,0,0"/>
           </StackPanel>
         </DockPanel>
@@ -68,7 +68,7 @@
             <TextBlock x:Name="PageSubtitle" Text="把注意力留在当前这一段。" Style="{StaticResource Caption}" Margin="0,7,0,0"/>
           </StackPanel>
           <Border Grid.Column="1" BorderBrush="{DynamicResource Line}" BorderThickness="1" CornerRadius="18" Padding="14,8" VerticalAlignment="Top">
-            <TextBlock Text="●  模拟反馈 · 无设备输出" Foreground="{DynamicResource Accent}" FontSize="12"/>
+            <TextBlock x:Name="OutputModeLabel" Text="●  模拟模式 · 未授权设备" Foreground="{DynamicResource Accent}" FontSize="12"/>
           </Border>
         </Grid>
         <ScrollViewer x:Name="PageScroll" Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="0,0,6,0">
@@ -145,7 +145,7 @@
                       </Grid>
                       <TextBlock x:Name="FeedbackLabel" Text="反馈待命" Style="{StaticResource Caption}" Margin="0,12,0,0"/>
                       <Grid Margin="0,16,0,0">
-                        <TextBlock Text="模拟强度" Style="{StaticResource Caption}"/>
+                        <TextBlock Text="曲线百分比" Style="{StaticResource Caption}"/>
                         <TextBlock x:Name="StrengthValueLabel" Text="0 / 0" HorizontalAlignment="Right" Foreground="{DynamicResource Accent}"/>
                       </Grid>
                       <ProgressBar x:Name="StrengthBar" Height="4" Margin="0,10,0,0" Maximum="100" Foreground="{DynamicResource Accent}" Background="{DynamicResource Raised}" BorderThickness="0"/>
@@ -310,10 +310,11 @@
                 <StackPanel x:Name="StrengthEditor" Visibility="Collapsed">
               <Border Style="{StaticResource Card}" Margin="0,0,0,16">
                 <StackPanel>
-                  <TextBlock Text="模拟强度递增" Style="{StaticResource SectionTitle}"/>
-                  <TextBlock Text="达到累计分心提醒线后，按间隔增加模拟强度，到上限停止。仅为 0–100 的预览刻度，不对应电流或设备指令。" Style="{StaticResource Caption}" Margin="0,0,0,12"/>
+                  <TextBlock Text="强度曲线" Style="{StaticResource SectionTitle}"/>
+                  <TextBlock Text="达到分心提醒线后递增，最近一小时多次分心可附加递增，最终不超过曲线上限。真实输出 = 本次手动设备上限 × 曲线百分比，向下取整。" Style="{StaticResource Caption}" Margin="0,0,0,12"/>
                   <StackPanel x:Name="StrengthSettingsEditor">
-                    <CheckBox x:Name="StrengthEnabledBox" Content="启用强度曲线预览（不发送电刺激）" Click="StrengthInputChanged"/>
+                    <CheckBox x:Name="StrengthEnabledBox" Content="启用强度曲线与预览" Click="StrengthInputChanged"/>
+                    <CheckBox x:Name="DeviceFeedbackBox" Content="此方案使用真实设备反馈（每次需手动授权设备上限）" Margin="0,8,0,0"/>
                     <UniformGrid Columns="4" Margin="0,12,0,0">
                       <StackPanel Margin="0,0,12,0">
                         <TextBlock Text="起始值" Style="{StaticResource Caption}"/>
@@ -332,6 +333,10 @@
                         <TextBox x:Name="StrengthIntervalBox" Text="30" Margin="0,7,0,0" TextChanged="StrengthTextChanged" AutomationProperties.Name="模拟强度递增间隔秒"/>
                       </StackPanel>
                     </UniformGrid>
+                    <StackPanel Margin="0,14,0,0" MaxWidth="340" HorizontalAlignment="Left">
+                      <TextBlock Text="一小时内每多一次分心附加百分比" Style="{StaticResource Caption}"/>
+                      <TextBox x:Name="IncidentBoostBox" Text="5" Margin="0,7,0,0" TextChanged="StrengthTextChanged" AutomationProperties.Name="重复分心附加强度百分比"/>
+                    </StackPanel>
                     <TextBlock x:Name="StrengthValidationLabel" Style="{StaticResource Caption}" Margin="0,12,0,0"/>
                     <local:StrengthChart x:Name="RampChart" Height="132" Margin="0,12,0,0" AutomationProperties.Name="达到提醒线后前五次递增的模拟强度曲线"/>
                   </StackPanel>
@@ -348,6 +353,11 @@
                       <ComboBoxItem Content="电脑复习 · 空闲时请求确认"/>
                       <ComboBoxItem Content="阅读 / 网课 · 定期请求确认"/>
                       <ComboBoxItem Content="纸笔复习 · 按时确认，暂停前台判断"/>
+                    </ComboBox>
+                    <TextBlock Text="电脑模式无操作时" Style="{StaticResource Caption}" Margin="0,14,0,7"/>
+                    <ComboBox x:Name="IdlePolicyBox" SelectedIndex="0" AutomationProperties.Name="电脑无操作的处理方式">
+                      <ComboBoxItem Content="请求学习确认 · 不累计分心"/>
+                      <ComboBoxItem Content="超过无操作时间后按分心计时"/>
                     </ComboBox>
                     <UniformGrid Columns="3" Margin="0,18,0,0">
                       <StackPanel Margin="0,0,14,0">
@@ -413,20 +423,48 @@
                   <TextBlock x:Name="BridgeLabel" Text="等待扩展连接"/>
                   <TextBlock Text="在浏览器的扩展管理页开启开发者模式，加载下载包中的 extension 文件夹。在扩展弹窗中粘贴本机配对码。" Style="{StaticResource Caption}" Margin="0,10,0,16"/>
                   <Button Content="复制本机配对码" Click="CopyTokenClick" HorizontalAlignment="Left"/>
+                  <WrapPanel Margin="0,12,0,0">
+                    <Button Content="打开扩展文件夹" Click="OpenExtensionFolderClick" Margin="0,0,10,8"/>
+                    <Button Content="复制扩展路径" Click="CopyExtensionPathClick" Margin="0,0,10,8"/>
+                    <Button Content="Chrome 扩展设置" Tag="chrome" Click="OpenBrowserSetupClick" Margin="0,0,10,8"/>
+                    <Button Content="Edge 扩展设置" Tag="msedge" Click="OpenBrowserSetupClick" Margin="0,0,0,8"/>
+                  </WrapPanel>
                   <TextBlock Text="扩展只向 127.0.0.1 发送当前窗口的活动页地址，不采集页面正文、密码或键入内容。完整地址仅在内存匹配，记录不保存浏览历史。" Style="{StaticResource Caption}" Margin="0,14,0,0"/>
                 </StackPanel>
               </Border>
               <Border Style="{StaticResource Card}">
                 <StackPanel>
-                  <TextBlock Text="DG-LAB 4 App · 连接预览" Style="{StaticResource SectionTitle}"/>
-                  <TextBlock Text="当前版本仅完成配对与设备发现，不发送电刺激指令。实际主机和 App 版本将在设备到货后验证。" Foreground="{DynamicResource Accent}" Margin="0,0,0,14"/>
-                  <TextBlock x:Name="DeviceStatusLabel" Text="未连接 · 模拟反馈可独立运行" Style="{StaticResource Caption}"/>
+                  <TextBlock Text="DG-LAB 4 App · 郊狼 3" Style="{StaticResource SectionTitle}"/>
+                  <TextBlock Text="先在手机 App 连接主机并开放 Socket 控制，再扫码配对。本软件只控制你选定的一个通道。暂停、断连或重启后需重新授权。" Style="{StaticResource Caption}" Margin="0,0,0,14"/>
+                  <TextBlock x:Name="DeviceStatusLabel" Text="未连接 · 可先使用模拟模式" Style="{StaticResource Caption}"/>
                   <StackPanel Orientation="Horizontal" Margin="0,16,0,0">
                     <Button x:Name="DeviceConnectButton" Content="生成配对二维码" Click="DeviceConnectClick"/>
                     <Button Content="断开连接" Click="DeviceDisconnectClick" Margin="12,0,0,0"/>
+                    <Button Content="刷新设备" Click="RefreshDevicesClick" Margin="12,0,0,0"/>
                   </StackPanel>
                   <Image x:Name="PairingQr" Width="220" Height="220" Stretch="Uniform" HorizontalAlignment="Left" Margin="0,20,0,0" Visibility="Collapsed" AutomationProperties.Name="DG-LAB App 配对二维码"/>
-                  <TextBlock Text="连接预览使用官方 WebSocket 中继，手机 App 与中继交换配对和设备状态。专注记录与网页地址不发送到中继。" Style="{StaticResource Caption}" Margin="0,16,0,0"/>
+                  <TextBlock Text="控制设备" Style="{StaticResource Caption}" Margin="0,20,0,7"/>
+                  <ComboBox x:Name="DevicePicker" DisplayMemberPath="Display" SelectionChanged="DeviceChoiceChanged" AutomationProperties.Name="选择 DG-LAB 主机"/>
+                  <UniformGrid Columns="2" Margin="0,14,0,0">
+                    <StackPanel Margin="0,0,14,0">
+                      <TextBlock Text="输出通道" Style="{StaticResource Caption}"/>
+                      <ComboBox x:Name="DeviceChannelBox" SelectedIndex="0" SelectionChanged="DeviceChoiceChanged" Margin="0,7,0,0" AutomationProperties.Name="DG-LAB 输出通道">
+                        <ComboBoxItem Content="A 通道"/><ComboBoxItem Content="B 通道"/>
+                      </ComboBox>
+                    </StackPanel>
+                    <StackPanel>
+                      <TextBlock Text="本次设备硬上限 · 每次手动确认" Style="{StaticResource Caption}"/>
+                      <TextBox x:Name="DeviceCapBox" Text="0" Margin="0,7,0,0" AutomationProperties.Name="本次真实设备输出上限" TextChanged="DeviceCapChanged"/>
+                    </StackPanel>
+                  </UniformGrid>
+                  <TextBlock x:Name="DeviceInfoLabel" Text="尚未选择设备。" Style="{StaticResource Caption}" Margin="0,12,0,0"/>
+                  <WrapPanel Margin="0,16,0,0">
+                    <Button x:Name="ArmDeviceButton" Content="授权本次设备输出" Click="ArmDeviceClick" Style="{StaticResource Primary}" Margin="0,0,12,8"/>
+                    <Button Content="立即清零并撤销授权" Click="StopDeviceClick" Foreground="{DynamicResource Danger}" Margin="0,0,0,8"/>
+                  </WrapPanel>
+                  <TextBlock x:Name="DeviceOutputLabel" Text="设备未授权。方案默认使用模拟模式。" Foreground="{DynamicResource Accent}"/>
+                  <TextBlock Text="真实输出使用 1 秒短任务。软件不续发时，App 中的临时强度会随任务结束归零。立即停止独立于普通退出的 5 分钟等待。设备尚未到货，协议联调不等于实机验证。" Style="{StaticResource Caption}" Margin="0,12,0,0"/>
+                  <TextBlock Text="设备连接通过官方 WebSocket 中继交换配对、设备状态与控制指令。专注记录与网页地址不发送到中继。" Style="{StaticResource Caption}" Margin="0,16,0,0"/>
                 </StackPanel>
               </Border>
             </StackPanel>

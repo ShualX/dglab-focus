@@ -291,6 +291,33 @@ Test("active plan remains fixed even if a different plan is passed", () => {
     True(rejected); Equal(original, s.PlanId);
 });
 
+Test("repeat distraction raises the curve only inside its configured ceiling", () => {
+    var curve = new StrengthPreviewOptions { Initial = 10, Maximum = 30, Increment = 5, IntervalSeconds = 30, IncidentIncrement = 8 };
+    Equal(10d, curve.At(60, 60, 1)); Equal(18d, curve.At(60, 60, 2)); Equal(30d, curve.At(60, 60, 100));
+    Equal(0d, curve.At(59, 60, 100));
+});
+Test("idle counting is an explicit computer policy and still respects unknown detection", () => {
+    var s = New(options: new() { FocusMinutes = 0, IdleSeconds = 30, IdlePolicy = IdlePolicy.CountAsDistraction, GraceSeconds = 1 });
+    Advance(s, 40, Attention.Allowed, idle: 40); True(!s.NeedsCheckIn); True(s.DebtSeconds > 0);
+    var debt = s.DebtSeconds; Advance(s, 10, Attention.Unknown, 40, 100); Equal(debt, s.DebtSeconds);
+});
+Test("real output remains opt-in and uses the same eligible curve", () => {
+    var simulation = New(); Advance(simulation, 80, Attention.Outside); True(simulation.PreviewStrength > 0); Equal(0d, simulation.OutputPercent);
+    var real = New(options: new() { FocusMinutes = 0, DeviceFeedback = true }); Advance(real, 80, Attention.Outside);
+    Equal(real.PreviewStrength, real.OutputPercent); True(real.OutputPercent > 0);
+    real.Suspend(origin.AddSeconds(80), "stop"); Equal(0d, real.OutputPercent);
+});
+Test("device readiness refuses unknown, muted, unsupported and overheated channels", () => {
+    var props = System.Text.Json.Nodes.JsonNode.Parse("{\"connectState\":\"connected\",\"channelAStatus\":0}")!.AsObject();
+    var state = System.Text.Json.Nodes.JsonNode.Parse("{\"hasDevice\":true,\"channelA\":{\"isMuted\":false,\"intensityMax\":40}}")!.AsObject();
+    var d = new DglabDevice("app", "slot", "test", "COYOTE_030", props, state);
+    True(d.TryLimit(0, out var max, out _)); Equal(40d, max);
+    True(!d.TryLimit(1, out _, out _)); True(!(d with { Type = "COYOTE_020" }).TryLimit(0, out _, out _));
+    state["channelA"]!["isMuted"] = true; True(!d.TryLimit(0, out _, out _));
+    state["channelA"]!["isMuted"] = false; state["channelA"]!["comfortLimit"] = new System.Text.Json.Nodes.JsonObject { ["overheat"] = true };
+    True(!d.TryLimit(0, out _, out _));
+});
+
 var failed = 0;
 foreach (var (name, run) in tests)
 {

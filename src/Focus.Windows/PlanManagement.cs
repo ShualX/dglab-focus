@@ -48,6 +48,7 @@ public partial class MainWindow
 
     private void SelectPlan(Guid? id)
     {
+        if (device.IsArmed) _ = device.StopAsync();
         selectedPlanId = id;
         var plan = SelectedPlan;
         settings.Options = plan?.Options ?? new();

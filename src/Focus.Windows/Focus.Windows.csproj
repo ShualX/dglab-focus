@@ -10,7 +10,7 @@
     <RootNamespace>DglabFocus.Windows</RootNamespace>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>Assets/focus.ico</ApplicationIcon>
-    <Description>郊狼自习室 Windows 专注工具（模拟预览版）</Description>
+    <Description>郊狼自习室 Windows 专注工具（DG-LAB 4 与郊狼 3）</Description>
   </PropertyGroup>
   <ItemGroup>
     <FrameworkReference Include="Microsoft.AspNetCore.App"/>

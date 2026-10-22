@@ -2,7 +2,9 @@
 
 官方旧仓库已转到 [dungeonlab-open/dglab-websocket-simple](https://github.com/dungeonlab-open/dglab-websocket-simple)，README 指向新的 TypeScript / Python SDK 与中继。新的 [DGLAB KIT](https://github.com/dungeonlab-open/dglab-kit) 面向 DG-LAB 4 App，建议新接入使用 V4，V3 用于旧控制器兼容。主机代际、App 版本与 Socket 协议版本需要分别核实。
 
-本版 V4 连接预览仅接收 `hello`、`client_attached`、`client_disconnected` 与设备快照，没有实现输出操作。扫描二维码时官方中继会参与配对，前台检测仍在本机运行。设备未到货，实机行为未知。
+2026-10-22 根据 [官方 V4 跨语言协议说明](https://github.com/dungeonlab-open/dglab-kit/blob/main/README_CN.md#v4-协议参考)实现设备控制。使用临时强度、波形、任务清理与绝对归零操作，处理设备快照、状态增量和 RPC 响应。每次任务限定 1000 毫秒，依赖 App 约定的任务到期归零机制。设备尚未到货，当前验证使用本机模拟 App。
+
+支持范围为 DG-LAB 4 App + `COYOTE_030`。操作同时指定 App 的 `clientId` 和主机的 `slotId`，通道使用 0 / 1。控制器匹配来源和请求 ID，并使用 App 的通道上限限制授权。未复用官方 GPL SDK 的实现代码或内置波形资源，均匀帧按公开线协议独立构造。
 
 | 相关项目 | 核对内容 | 与本项目的关系 |
 | --- | --- | --- |

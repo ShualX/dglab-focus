@@ -1,6 +1,7 @@
 namespace DglabFocus.Core;
 
 public enum StudyMode { Computer, Reading, Paper }
+public enum IdlePolicy { ConfirmOnly, CountAsDistraction }
 public enum SessionState { Idle, Focusing, Resting, ExitPending, Suspended, Completed }
 public sealed record SessionOptions
 {
@@ -11,6 +12,8 @@ public sealed record SessionOptions
     public RuleMode ApplicationMode { get; init; }
     public RuleMode WebsiteMode { get; init; }
     public StrengthPreviewOptions StrengthPreview { get; init; } = new();
+    public bool DeviceFeedback { get; init; }
+    public IdlePolicy IdlePolicy { get; init; }
     public double GraceSeconds { get; init; } = 10;
     public double AlertThresholdSeconds { get; init; } = 60;
     public double RecoveryDelaySeconds { get; init; } = 120;
@@ -19,7 +22,7 @@ public sealed record SessionOptions
     public double CheckInMinutes { get; init; } = 15;
     public void Validate()
     {
-        if (!Enum.IsDefined(Mode) || !Enum.IsDefined(ApplicationMode) || !Enum.IsDefined(WebsiteMode))
+        if (!Enum.IsDefined(Mode) || !Enum.IsDefined(ApplicationMode) || !Enum.IsDefined(WebsiteMode) || !Enum.IsDefined(IdlePolicy))
             throw new ArgumentException("请选择有效的学习方式与黑白名单模式。");
         if (StrengthPreview == null) throw new ArgumentException("模拟强度设置无效。");
         StrengthPreview.Validate();
@@ -78,8 +81,10 @@ public sealed class Session
     private double outsideSeconds, recoverySeconds;
     private bool incidentCounted, alerted, restEndsSession;
     private bool previewEligible;
+    private DateTimeOffset tickAt;
     public double PreviewStrength => previewEligible && !NeedsCheckIn && State is SessionState.Focusing or SessionState.ExitPending
-        ? Options.StrengthPreview.At(DebtSeconds, Options.AlertThresholdSeconds) : 0;
+        ? Options.StrengthPreview.At(DebtSeconds, Options.AlertThresholdSeconds, RecentCount(tickAt)) : 0;
+    public double OutputPercent => Options.DeviceFeedback ? PreviewStrength : 0;
     public int RecentCount(DateTimeOffset now) => Incidents.Count(x => x > now.AddHours(-1) && x <= now);
 
     public void Start(FocusPlan? plan, DateTimeOffset now)
@@ -102,6 +107,7 @@ public sealed class Session
         NeedsCheckIn = incidentCounted = alerted = restEndsSession = false;
         previewEligible = false;
         State = SessionState.Focusing;
+        tickAt = now;
         Emit(now, "start", $"已按「{PlanName}」开始专注。临时域名名额：1 个。");
     }
 
@@ -183,6 +189,7 @@ public sealed class Session
 
     public void Tick(TimeSpan delta, DateTimeOffset now, Attention attention, double idleSeconds)
     {
+        tickAt = now;
         previewEligible = false;
         Incidents.RemoveAll(x => x <= now.AddHours(-1));
         if (!IsActive || State == SessionState.Suspended) return;
@@ -217,8 +224,9 @@ public sealed class Session
             return;
         }
 
+        var computerIdle = Options.Mode == StudyMode.Computer && idleSeconds >= Options.IdleSeconds && SinceCheckIn >= Options.IdleSeconds;
         NeedsCheckIn = Options.Mode == StudyMode.Computer
-            ? idleSeconds >= Options.IdleSeconds && SinceCheckIn >= Options.IdleSeconds
+            ? computerIdle && Options.IdlePolicy == IdlePolicy.ConfirmOnly
             : SinceCheckIn >= Options.CheckInMinutes * 60;
         if (Options.Mode == StudyMode.Paper || NeedsCheckIn)
         {
@@ -226,6 +234,8 @@ public sealed class Session
             ResetContinuity();
             return;
         }
+        if (computerIdle && Options.IdlePolicy == IdlePolicy.CountAsDistraction && attention != Attention.Unknown)
+            attention = Attention.Outside;
         if (attention is Attention.Unknown or Attention.Neutral)
         {
             StatusReason = attention == Attention.Unknown ? "检测状态未知，暂停累计与恢复。" : "正在操作专注面板，暂停累计与恢复。";

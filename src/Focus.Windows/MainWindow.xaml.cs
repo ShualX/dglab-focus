@@ -22,7 +22,7 @@ public partial class MainWindow : Window
     private readonly AppSettings settings;
     private readonly Session session;
     private readonly BrowserBridge bridge;
-    private readonly DglabPreview device = new();
+    private readonly DglabController device;
     private readonly ObservableCollection<AllowRule> rules;
     private readonly ObservableCollection<SessionEvent> history;
     private readonly DispatcherTimer timer = new() { Interval = TimeSpan.FromSeconds(1) };
@@ -45,6 +45,14 @@ public partial class MainWindow : Window
     public MainWindow(bool smokeTest, string[] args)
     {
         smoke = smokeTest;
+        var relayIndex = Array.IndexOf(args, "--device-test-relay");
+        Uri? testRelay = null;
+        if (smoke && relayIndex >= 0 && relayIndex + 1 < args.Length)
+        {
+            testRelay = new Uri(args[relayIndex + 1]);
+            if (testRelay.Scheme != "ws" || testRelay.Host != "127.0.0.1") throw new ArgumentException("设备界面测试只允许本机模拟中继。");
+        }
+        device = new DglabController(testRelay);
         storage = new Storage(smoke);
         settings = storage.Load();
         session = settings.Session != null ? Session.Restore(settings.Session) : new Session();
@@ -87,6 +95,13 @@ public partial class MainWindow : Window
                 PairingQr.Visibility = Visibility.Visible;
             }
         });
+        device.DevicesChanged += () => Dispatcher.InvokeAsync(RefreshDeviceList);
+        device.Faulted += reason => Dispatcher.InvokeAsync(() =>
+        {
+            if (session.IsActive && session.Options.DeviceFeedback) SuspendForFault(reason);
+            else Notice(reason);
+            Refresh();
+        });
         timer.Tick += (_, _) => Tick();
         PreviewKeyDown += KeyDownHandler;
         SizeChanged += (_, _) => { Dial.Height = ActualHeight < 760 ? 232 : 294; };
@@ -102,6 +117,7 @@ public partial class MainWindow : Window
             CreateTray();
             timer.Start();
             if (storage.LoadError != null) Notice(storage.LoadError);
+            else if (storage.RecoveryWarning != null) Notice(storage.RecoveryWarning);
         }
         Refresh();
     }
@@ -121,6 +137,9 @@ public partial class MainWindow : Window
         StrengthEnabledBox.IsChecked = o.StrengthPreview.Enabled;
         StrengthInitialBox.Text = N(o.StrengthPreview.Initial); StrengthMaximumBox.Text = N(o.StrengthPreview.Maximum);
         StrengthIncrementBox.Text = N(o.StrengthPreview.Increment); StrengthIntervalBox.Text = N(o.StrengthPreview.IntervalSeconds);
+        IncidentBoostBox.Text = N(o.StrengthPreview.IncidentIncrement);
+        DeviceFeedbackBox.IsChecked = o.DeviceFeedback;
+        IdlePolicyBox.SelectedIndex = (int)o.IdlePolicy;
         initializing = wasInitializing;
         UpdateStrengthPreview();
     }
@@ -132,7 +151,7 @@ public partial class MainWindow : Window
     private StrengthPreviewOptions ReadStrength() => new()
     {
         Enabled = StrengthEnabledBox.IsChecked == true, Initial = Number(StrengthInitialBox), Maximum = Number(StrengthMaximumBox),
-        Increment = Number(StrengthIncrementBox), IntervalSeconds = Number(StrengthIntervalBox)
+        Increment = Number(StrengthIncrementBox), IntervalSeconds = Number(StrengthIntervalBox), IncidentIncrement = Number(IncidentBoostBox)
     };
     private SessionOptions ReadOptions()
     {
@@ -142,7 +161,7 @@ public partial class MainWindow : Window
             Repeat = RepeatBox.IsChecked == true, GraceSeconds = Number(GraceBox), AlertThresholdSeconds = Number(ThresholdBox),
             IdleSeconds = Number(IdleBox), CheckInMinutes = Number(CheckInMinutesBox), RecoveryDelaySeconds = Number(RecoveryDelayBox), RecoveryRate = Number(RecoveryRateBox),
             ApplicationMode = (RuleMode)AppPolicyBox.SelectedIndex, WebsiteMode = (RuleMode)WebPolicyBox.SelectedIndex,
-            StrengthPreview = ReadStrength()
+            StrengthPreview = ReadStrength(), DeviceFeedback = DeviceFeedbackBox.IsChecked == true, IdlePolicy = (IdlePolicy)IdlePolicyBox.SelectedIndex
         };
         o.Validate();
         return o;
@@ -164,6 +183,7 @@ public partial class MainWindow : Window
             CurrentUrlLabel.Text = report != null && Rules.TryHost(report.Url, out var host) ? host : foreground.Browser != null ? "等待已配对扩展报告当前页面" : $"键鼠空闲 {Math.Floor(foreground.IdleSeconds)} 秒";
             DetectionLabel.Text = attention switch { Attention.Allowed => "允许的学习内容", Attention.Outside => "当前内容未放行", Attention.Neutral => "正在操作专注面板", _ => "检测状态未知" };
             session.Tick(delta, now, attention, foreground.IdleSeconds);
+            device.SetDesired(session.OutputPercent);
             BridgeLabel.Text = $"{bridge.Status} · {bridge.ConnectionCount(now)} 个浏览器连接";
             Refresh();
             if (++saveTick >= 5) { saveTick = 0; Save(); }
@@ -177,11 +197,13 @@ public partial class MainWindow : Window
         while (history.Count > 200) history.RemoveAt(history.Count - 1);
         if (e.Kind == "feedback")
         {
-            FeedbackLabel.Text = $"模拟反馈 · 提醒等级 {e.Level}";
+            FeedbackLabel.Text = $"分心提醒 · 提醒等级 {e.Level}";
             if (settings.Sound && !smoke) System.Media.SystemSounds.Exclamation.Play();
             Pulse(NoticePanel);
         }
         Notice(e.Message);
+        if (e.Kind is "completed" or "suspended") _ = device.StopAsync();
+        else if (e.Kind is "rest" or "check-in") device.SetDesired(0);
         Save();
     }
     private void Save()
@@ -215,7 +237,7 @@ public partial class MainWindow : Window
         ThresholdLabel.Text = $"提醒线 {o.AlertThresholdSeconds:0} 秒 / 持续专注后逐渐消除";
         IncidentLabel.Text = $"{session.RecentCount(DateTimeOffset.Now)} 次分心";
         ReasonLabel.Text = session.StatusReason;
-        StrengthValueLabel.Text = $"{session.PreviewStrength:0.#} / {o.StrengthPreview.Maximum:0.#}";
+        StrengthValueLabel.Text = $"{session.PreviewStrength:0.#}% / {o.StrengthPreview.Maximum:0.#}%";
         StrengthBar.Maximum = Math.Max(1, o.StrengthPreview.Maximum); StrengthBar.Value = session.PreviewStrength;
         StartButton.Content = session.State switch { SessionState.Suspended => "继续本次会话", SessionState.Resting => "结束休息", SessionState.Focusing => "专注进行中", SessionState.ExitPending => "继续复习，等待退出", _ => "开始专注" };
         StartButton.IsEnabled = storage.LoadError == null && (session.IsActive || SelectedPlan != null) && session.State is not (SessionState.Focusing or SessionState.ExitPending);
@@ -231,6 +253,7 @@ public partial class MainWindow : Window
         AddAppButton.IsEnabled = BrowserRuleEditor.IsEnabled = SubdomainsBox.IsEnabled = SessionSettingsEditor.IsEnabled = editable;
         PolicyEditor.IsEnabled = AppRuleEditor.IsEnabled = StrengthSettingsEditor.IsEnabled = editable;
         RefreshPlans();
+        RefreshDeviceControls();
         var summary = $"白名单 {rules.Count(x => x.Action == RuleAction.Allow)} 条 · 黑名单 {rules.Count(x => x.Action == RuleAction.Block)} 条。";
         RuleLockLabel.Text = summary + (session.IsActive ? "本次会话规则与模式已锁定。" : "黑名单始终优先，白名单模式下未列出内容算分心。");
         floating?.Update(stateText, Clock(seconds), session.State, session.NeedsCheckIn, session.DebtSeconds, o.AlertThresholdSeconds);
@@ -279,14 +302,19 @@ public partial class MainWindow : Window
         if (storage.LoadError != null) { Notice(storage.LoadError); return; }
         try
         {
-            if (session.State == SessionState.Suspended) session.Resume(DateTimeOffset.Now);
+            if (session.State == SessionState.Suspended)
+            {
+                if (session.Options.DeviceFeedback && !device.IsArmed) { Notice("本次会话使用真实输出，请先在设备页重新授权。"); ShowPage("DevicePage"); return; }
+                session.Resume(DateTimeOffset.Now);
+            }
             else if (session.State == SessionState.Resting) session.EndBreak(DateTimeOffset.Now);
             else if (!session.IsActive)
             {
                 if (SelectedPlan == null) { Notice("请先创建并选择一个专注方案。"); ShowPage("PlansPage"); PlanPicker.Focus(); return; }
                 CommitSelectedPlan();
+                if (SelectedPlan!.Options.DeviceFeedback && !device.IsArmed) { Notice("此方案启用了真实输出，请先连接设备并授权本次上限。"); Save(); ShowPage("DevicePage"); return; }
                 session.Start(SelectedPlan, DateTimeOffset.Now);
-                FeedbackLabel.Text = "模拟反馈待命 · 无设备输出";
+                FeedbackLabel.Text = session.Options.DeviceFeedback ? "设备反馈待命 · 本次已授权" : "模拟反馈待命 · 无设备输出";
                 FloatClick(sender, e);
             }
             lastTick = elapsed.Elapsed;
@@ -327,7 +355,7 @@ public partial class MainWindow : Window
         {
             var preview = ReadStrength(); preview.Validate();
             StrengthValidationLabel.Foreground = (Brush)FindResource("Muted");
-            StrengthValidationLabel.Text = preview.Enabled ? "达到提醒线后的前五次递增预览；只在确定分心且超过宽限期时显示模拟强度。" : "曲线预览已关闭。启用后保存设置，在下一次会话生效。";
+            StrengthValidationLabel.Text = preview.Enabled ? "下图展示首次分心达到提醒线后的前五次递增；重复分心的附加值仍受曲线上限约束。" : "曲线已关闭，不产生曲线反馈。启用后保存方案，在下一次会话生效。";
             RampChart.Update(preview);
         }
         catch (ArgumentException ex)
@@ -340,11 +368,12 @@ public partial class MainWindow : Window
     private void CancelExitClick(object sender, RoutedEventArgs e) { session.CancelExit(DateTimeOffset.Now); Save(); Refresh(); }
     private void CheckInClick(object sender, RoutedEventArgs e) { session.CheckIn(DateTimeOffset.Now); Save(); Refresh(); }
     private void BreakClick(object sender, RoutedEventArgs e) { session.TakeBreak(DateTimeOffset.Now); Save(); ShowPage("FocusPage"); Refresh(); }
-    private void EmergencyClick(object sender, RoutedEventArgs e) => SuspendForFault("已立即暂停会话与模拟反馈。继续时保留本次会话规则。");
+    private void EmergencyClick(object sender, RoutedEventArgs e) => SuspendForFault("会话已暂停，已停止续发并撤销设备授权。继续时保留本次规则。");
     public void SuspendForFault(string reason)
     {
-        session.Suspend(DateTimeOffset.Now, reason); device.Dispose(); PairingQr.Visibility = Visibility.Collapsed;
-        DeviceStatusLabel.Text = "连接已关闭"; Save(); Refresh(); Notice(reason);
+        if (!session.IsActive || session.State == SessionState.Suspended) _ = device.StopAsync();
+        session.Suspend(DateTimeOffset.Now, reason);
+        Save(); Refresh(); Notice(reason);
     }
     private void TemporaryClick(object sender, RoutedEventArgs e)
     {
@@ -393,7 +422,7 @@ public partial class MainWindow : Window
     private void ShowMain() { Show(); WindowState = WindowState.Normal; Activate(); }
     private void CreateTray()
     {
-        tray = new System.Windows.Forms.NotifyIcon { Text = "郊狼自习室 · 模拟预览版", Icon = System.Drawing.SystemIcons.Application, Visible = true };
+        tray = new System.Windows.Forms.NotifyIcon { Text = "郊狼自习室 · Windows", Icon = System.Drawing.SystemIcons.Application, Visible = true };
         using (var stream = System.Windows.Application.GetResourceStream(new Uri("pack://application:,,,/Assets/focus.ico")).Stream)
             tray.Icon = new System.Drawing.Icon(stream);
         var menu = new System.Windows.Forms.ContextMenuStrip();
@@ -466,12 +495,17 @@ public partial class MainWindow : Window
     }
     private async void DeviceConnectClick(object sender, RoutedEventArgs e)
     {
+        if (session.IsActive && session.Options.DeviceFeedback) SuspendForFault("重新配对设备，专注会话已暂停。");
         PairingQr.Source = null; PairingQr.Visibility = Visibility.Collapsed;
         DeviceConnectButton.IsEnabled = false; DeviceStatusLabel.Text = "正在连接官方中继…";
         try { await device.Connect(); } finally { DeviceConnectButton.IsEnabled = true; }
     }
-    private void DeviceDisconnectClick(object sender, RoutedEventArgs e)
-    { device.Dispose(); pairingUrl = null; PairingQr.Source = null; PairingQr.Visibility = Visibility.Collapsed; DeviceStatusLabel.Text = "已断开连接"; }
+    private async void DeviceDisconnectClick(object sender, RoutedEventArgs e)
+    {
+        if (session.IsActive && session.Options.DeviceFeedback) SuspendForFault("设备已断开，专注会话暂停。");
+        await device.DisconnectAsync(); pairingUrl = null; PairingQr.Source = null; PairingQr.Visibility = Visibility.Collapsed;
+        DeviceStatusLabel.Text = "已断开连接"; Refresh();
+    }
     private void WindowClosing(object? sender, CancelEventArgs e)
     {
         if (closing) return;
@@ -484,10 +518,12 @@ public partial class MainWindow : Window
         }
         e.Cancel = true; Quit();
     }
-    private void Quit()
+    private async void Quit()
     {
+        if (closing) return;
         closing = true; timer.Stop(); Save();
-        bridge.Dispose(); device.Dispose(); floating?.Close(); tray?.Dispose();
+        await device.DisconnectAsync();
+        bridge.Dispose(); floating?.Close(); tray?.Dispose();
         NativeMonitor.UnregisterHotKey(new WindowInteropHelper(this).Handle, 1);
         SystemEvents.SessionSwitch -= SessionSwitch; SystemEvents.PowerModeChanged -= PowerChanged;
         SystemParameters.StaticPropertyChanged -= SystemPropertyChanged;
@@ -549,6 +585,12 @@ public partial class MainWindow : Window
             await Dispatcher.InvokeAsync(() => { UpdateLayout(); Capture(folder, "PlansRules"); }, DispatcherPriority.ApplicationIdle);
             ShowPlanTab("RhythmEditor");
             await Dispatcher.InvokeAsync(() => { UpdateLayout(); Capture(folder, "PlansRhythm"); }, DispatcherPriority.ApplicationIdle);
+            DeviceFeedbackBox.IsChecked = true; SaveSettingsClick(this, new RoutedEventArgs());
+            StartClick(this, new RoutedEventArgs());
+            if (session.IsActive || page != "DevicePage") throw new InvalidOperationException("未授权设备的真实方案仍可启动。");
+            PageScroll.ScrollToBottom();
+            await Dispatcher.InvokeAsync(() => { UpdateLayout(); Capture(folder, "DeviceSetup"); }, DispatcherPriority.ApplicationIdle);
+            DeviceFeedbackBox.IsChecked = false; SaveSettingsClick(this, new RoutedEventArgs());
             StartClick(this, new RoutedEventArgs());
             if (session.PlanId != firstId || session.PlanName != "网课复习") throw new InvalidOperationException("启动没有绑定选择的方案。");
             PlanPicker.SelectedValue = secondId;
@@ -589,7 +631,36 @@ public partial class MainWindow : Window
             await Dispatcher.InvokeAsync(() => { UpdateLayout(); Capture(folder, "Compact"); }, DispatcherPriority.ApplicationIdle);
             ShowPage("PlansPage"); ShowPlanTab("RulesEditor");
             await Dispatcher.InvokeAsync(() => { UpdateLayout(); Capture(folder, "PlansCompact"); }, DispatcherPriority.ApplicationIdle);
-            File.WriteAllText(Path.Combine(folder, "smoke-result.txt"), $"PASS: empty plan library, required selection, create/copy/rename/delete/undo, isolated plan rules and timing, invalid edits block switching, active plan locked.\n5 pages, plan tabs, default strength curve, validation, active simulation, exit, floating and compact layouts rendered.\nUnknown state cleared preview. No device output or user settings used.\nRuntime: {RuntimeInformation.FrameworkDescription}\n");
+            if (Array.IndexOf(args, "--device-test-relay") >= 0)
+            {
+                for (int i = 0; i < 301; i++) session.Tick(TimeSpan.FromSeconds(1), DateTimeOffset.Now, Attention.Allowed, 0);
+                SelectPlan(firstId); DeviceFeedbackBox.IsChecked = true; SaveSettingsClick(this, new RoutedEventArgs());
+                await device.Connect();
+                var until = Environment.TickCount64 + 4000;
+                while (device.Devices.Count == 0 && Environment.TickCount64 < until) await Task.Delay(20);
+                RefreshDeviceList(); DevicePicker.SelectedIndex = 0; DeviceCapBox.Text = "20";
+                ArmDeviceClick(this, new RoutedEventArgs());
+                until = Environment.TickCount64 + 4000;
+                while (!device.IsArmed && Environment.TickCount64 < until) await Task.Delay(20);
+                if (!device.IsArmed) throw new InvalidOperationException("本机模拟 App 的设备未能通过界面授权。");
+                StartClick(this, new RoutedEventArgs());
+                if (!session.IsActive || !session.Options.DeviceFeedback) throw new InvalidOperationException("真实设备方案没有启动。");
+                for (int i = 0; i < 110; i++) session.Tick(TimeSpan.FromSeconds(1), DateTimeOffset.Now, Attention.Outside, 0);
+                device.SetDesired(session.OutputPercent);
+                until = Environment.TickCount64 + 2500;
+                while (device.RequestedIntensity == 0 && Environment.TickCount64 < until) await Task.Delay(20);
+                if (device.RequestedIntensity is <= 0 or > 20) throw new InvalidOperationException("方案分心没有产生受上限约束的真实协议指令。");
+                Width = 1180; Height = 830; ShowPage("DevicePage"); PageScroll.ScrollToBottom(); Refresh();
+                await Dispatcher.InvokeAsync(() => { UpdateLayout(); Capture(folder, "DeviceArmedLocalTest"); }, DispatcherPriority.ApplicationIdle);
+                EmergencyClick(this, new RoutedEventArgs());
+                if (device.IsArmed || session.State != SessionState.Suspended) throw new InvalidOperationException("急停未撤销授权或暂停会话。");
+                await device.StopAsync();
+                if (device.RequestedIntensity != 0) throw new InvalidOperationException("急停未清零设备指令。");
+                await Dispatcher.InvokeAsync(() => { UpdateLayout(); Capture(folder, "DeviceStoppedLocalTest"); }, DispatcherPriority.ApplicationIdle);
+            }
+            File.WriteAllText(Path.Combine(folder, "smoke-result.txt"), $"PASS: empty plan library, required selection, create/copy/rename/delete/undo, isolated plan rules and timing, invalid edits block switching, active plan locked.\n5 pages, plan tabs, default strength curve, validation, active simulation, exit, floating and compact layouts rendered.\nUnknown state cleared preview. No physical devices or user settings used.\nRuntime: {RuntimeInformation.FrameworkDescription}\n");
+            if (Array.IndexOf(args, "--device-test-relay") >= 0)
+                File.AppendAllText(Path.Combine(folder, "smoke-result.txt"), "PASS: local fake App only: UI authorization → selected plan → distraction → bounded V4 requests → emergency stop. No physical device connected.\n");
         }
         catch (Exception e) { File.WriteAllText(Path.Combine(folder, "smoke-result.txt"), "FAIL: " + e); Environment.ExitCode = 1; }
         Quit();

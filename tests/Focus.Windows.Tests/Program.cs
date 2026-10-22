@@ -31,6 +31,7 @@ async Task Until(Func<bool> condition)
 }
 try
 {
+    await DglabIntegration.Run(Assert);
     var fresh = new AppSettings(); fresh.InitializePlans();
     Assert(fresh.Plans!.Count == 0 && fresh.SelectedPlanId == null, "fresh installation has no implicitly chosen plan");
     var legacy = JsonSerializer.Deserialize<AppSettings>("{\"Options\":{\"FocusMinutes\":25,\"ApplicationMode\":1,\"StrengthPreview\":{\"Enabled\":false,\"Initial\":0,\"Maximum\":0}},\"Rules\":[{\"Kind\":0,\"Value\":\"reader.exe\",\"Action\":1}]}")!;
@@ -51,6 +52,15 @@ try
             "multiple plans, selected choice and explicit preview-off survive a disk restart");
         reloaded.SelectedPlanId = Guid.NewGuid(); reloaded.InitializePlans();
         Assert(reloaded.SelectedPlanId == null, "missing selected plan is cleared rather than replaced by another plan");
+        new Storage(false, tempDir).Save(persistence);
+        File.WriteAllText(Path.Combine(tempDir, "settings.json"), "{broken");
+        var recoveringStorage = new Storage(false, tempDir); var recovered = recoveringStorage.Load();
+        Assert(recovered.Plans!.Count == 2 && recoveringStorage.RecoveryWarning != null && recoveringStorage.LoadError == null
+            && Directory.GetFiles(tempDir, "settings.corrupt-*.json").Length == 1, "corrupt settings recover from an atomic backup while preserving the original file");
+        File.WriteAllText(Path.Combine(tempDir, "settings.json"), "{\"Options\":null}");
+        File.WriteAllText(Path.Combine(tempDir, "settings.json.bak"), "{\"Plans\":[null]}");
+        var invalidStorage = new Storage(false, tempDir); invalidStorage.Load();
+        Assert(invalidStorage.LoadError != null, "null configuration data reports a recoverable error instead of crashing startup");
     }
     finally { if (Directory.Exists(tempDir)) Directory.Delete(tempDir, true); }
     var activeLegacy = new AppSettings { Session = new SessionSnapshot { State = SessionState.Focusing }, Plans = null };
